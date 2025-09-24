@@ -25,17 +25,46 @@ def index():
     return render_template("home.html")
 
 
+
 @app.route("/create_session", methods=["POST"])
 def create_session():
-    """Create a session but don’t assign host yet — that happens on first join."""
     session_id = str(uuid.uuid4())[:6]
     sessions[session_id] = {
         "content": "",
         "participants": {},
-        "host_id": None,
-        "writer_id": None
+        "host_id": None,       # will be set in join_session
+        "writer_id": None      # will be set in join_session
     }
     return jsonify({"session_id": session_id})
+
+
+@socketio.on("join_session")
+def join_session(data):
+    session_id = data.get("session_id")
+    name = data.get("name")
+    sid = request.sid
+
+    if not session_id or session_id not in sessions:
+        emit("error", {"msg": "Session not found"})
+        return
+
+    join_room(session_id)
+
+    role = "participant"
+    if sessions[session_id]["host_id"] is None:     # first joiner becomes host
+        sessions[session_id]["host_id"] = sid
+        sessions[session_id]["writer_id"] = sid     # host is first writer
+        role = "host"
+
+    sessions[session_id]["participants"][sid] = {"name": name, "role": role}
+
+    emit("code_update", {"content": sessions[session_id]["content"]})
+    emit("participants_update", {
+        "participants": sessions[session_id]["participants"],
+        "writer_id": sessions[session_id]["writer_id"],
+        "host_id": sessions[session_id]["host_id"]
+    }, room=session_id)
+
 
 
 @app.route("/editor/<session_id>")
@@ -43,35 +72,6 @@ def editor(session_id):
     if session_id not in sessions:
         return "Session not found", 404
     return render_template("editor.html", session_id=session_id)
-@socketio.on("join_session")
-def join_session(data):
-    session_id = data.get("session_id")
-    name = data.get("name", "Anonymous")
-    sid = request.sid
-
-    if not session_id or session_id not in sessions:
-        emit("error", {"msg": "Session not found"})
-        return
-
-    sess = sessions[session_id]
-    join_room(session_id)
-
-    role = "participant"
-    if sess["host_id"] is None:
-        # First person to join = Host + Writer
-        sess["host_id"] = sid
-        sess["writer_id"] = sid
-        role = "host"
-
-    sess["participants"][sid] = {"name": name, "role": role}
-
-    # Send current content + who is the writer
-    emit("code_update", {"content": sess["content"]})
-    emit("participants_update", {
-        "participants": sess["participants"],
-        "writer_id": sess["writer_id"],
-        "host_id": sess["host_id"]
-    }, room=session_id)
 
 
 @socketio.on("code_change")

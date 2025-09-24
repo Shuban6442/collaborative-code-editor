@@ -64,9 +64,11 @@
       background: #0b1220;
       display: flex;
       flex-direction: column;
-    }
-    #participantsDrawer.hidden {
+      transition: transform 0.3s ease;
       transform: translateX(100%);
+    }
+    #participantsDrawer.open {
+      transform: translateX(0);
     }
     
     #plist { list-style: none; margin: 0; padding: 12px; flex: 1; overflow-y: auto; }
@@ -94,6 +96,16 @@
       cursor: pointer;
     }
     .p-actions button:hover { background: #2563eb; border-color: #2563eb; }
+
+    /* Writer banner */
+    #writerBanner {
+      text-align: center;
+      padding: 6px;
+      font-weight: bold;
+      background: #1e3a8a;
+      color: #fff;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -106,6 +118,8 @@
       <button id="participantsBtn" class="btn">Participants</button>
     </div>
   </div>
+
+  <div id="writerBanner">✏️ You are the Writer</div>
 
   <div class="container">
     <div class="left">
@@ -131,6 +145,7 @@
     const participantsDrawer = document.getElementById("participantsDrawer");
     const output = document.getElementById("output");
     const plist = document.getElementById("plist");
+    const writerBanner = document.getElementById("writerBanner");
 
     const sessionId = "{{ session_id }}";
     const urlParams = new URLSearchParams(window.location.search);
@@ -152,7 +167,6 @@
         readOnly: true
       });
 
-      // emit typing
       editor.onDidChangeModelContent(() => {
         if (mySid && mySid === writerId) {
           socket.emit("code_change", { session_id: sessionId, content: editor.getValue() });
@@ -163,15 +177,16 @@
     // join session
     socket.emit("join_session", { session_id: sessionId, name: myName });
 
-    // store my socket.id when connected
     socket.on("connect", () => {
       mySid = socket.id;
     });
 
     // sync code
     socket.on("code_update", data => {
-      if (editor && mySid !== writerId) {
-        editor.setValue(data.content);
+      if (editor) {
+        if (mySid !== writerId) {
+          editor.setValue(data.content);
+        }
       }
     });
 
@@ -181,12 +196,13 @@
       writerId = data.writer_id;
       const hostId = data.host_id;
 
+      console.log("Current writerId =", writerId, " | mySid =", mySid);
+
       for (const [sid, info] of Object.entries(data.participants)) {
         if (sid === mySid) myRole = info.role;
 
         const li = document.createElement("li");
 
-        // Info
         const infoDiv = document.createElement("div");
         infoDiv.className = "p-info";
         const nameSpan = document.createElement("span");
@@ -198,7 +214,6 @@
         infoDiv.appendChild(nameSpan);
         infoDiv.appendChild(roleSpan);
 
-        // Actions
         const actionsDiv = document.createElement("div");
         actionsDiv.className = "p-actions";
         if (myRole === "host" && sid !== hostId) {
@@ -224,8 +239,13 @@
         plist.appendChild(li);
       }
 
-      // allow editing only if I'm the writer
-      if (editor) editor.updateOptions({ readOnly: mySid !== writerId });
+      // Update editor permission + banner
+      if (editor) {
+        const isWriter = mySid === writerId;
+        editor.updateOptions({ readOnly: !isWriter });
+        writerBanner.style.display = isWriter ? "block" : "none";
+        console.log("Editor readOnly =", !isWriter);
+      }
     });
 
     // Run code
@@ -246,6 +266,11 @@
         socket.emit("code_change", { session_id: sessionId, content: "" });
       }
     };
+
+    // Toggle participants drawer
+    participantsBtn.addEventListener("click", () => {
+      participantsDrawer.classList.toggle("open");
+    });
   </script>
 </body>
 </html>
