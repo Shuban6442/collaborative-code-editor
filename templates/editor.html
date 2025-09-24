@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Session {{ session_id }}</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs/loader.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-light: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #3b82f6;
+      --border: #2a3342;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: #111827;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; gap: 10px; }
+    .session-code { background: #1f2937; padding: 4px 8px; border-radius: 6px; }
+    .actions { display: flex; gap: 8px; }
+
+    .container { display: flex; height: calc(100vh - 50px); }
+    .left { flex: 1; display: flex; flex-direction: column; }
+    #editor { flex: 1; border-bottom: 1px solid var(--border); }
+    .toolbar { padding: 8px; background: #111827; }
+    .btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #1f2937;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .btn.primary { background: #2563eb; border-color: #2563eb; }
+
+    #output {
+      padding: 10px;
+      background: #0b1220;
+      border-top: 1px solid var(--border);
+      min-height: 80px;
+      white-space: pre-wrap;
+      font-family: monospace;
+    }
+
+    /* Participants drawer */
+    #participantsDrawer {
+      width: 320px;
+      border-left: 1px solid var(--border);
+      background: #0b1220;
+      display: flex;
+      flex-direction: column;
+    }
+    #participantsDrawer.hidden {
+      transform: translateX(100%);
+    }
+    
+    #plist { list-style: none; margin: 0; padding: 12px; flex: 1; overflow-y: auto; }
+    #plist li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #111827;
+    }
+    .p-info { display: flex; flex-direction: column; }
+    .p-name { font-weight: 500; }
+    .p-role { font-size: 12px; color: var(--muted); }
+    .p-actions button {
+      margin-left: 6px;
+      padding: 4px 8px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid #2a3b52;
+      background: #1e293b;
+      color: #e5e7eb;
+      cursor: pointer;
+    }
+    .p-actions button:hover { background: #2563eb; border-color: #2563eb; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">
+      <span class="session-code">Session {{ session_id }}</span>
+      <span class="badge">Python</span>
+    </div>
+    <div class="actions">
+      <button id="participantsBtn" class="btn">Participants</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="left">
+      <div id="editor"></div>
+      <div class="toolbar">
+        <button id="runBtn" class="btn primary">Run</button>
+        <button id="clearBtn" class="btn">Clear</button>
+      </div>
+      <div id="output"></div>
+    </div>
+
+    <div id="participantsDrawer">
+      <h3 style="padding:12px; margin:0; border-bottom:1px solid var(--border);">Participants</h3>
+      <ul id="plist"></ul>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    const runBtn = document.getElementById("runBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const participantsBtn = document.getElementById("participantsBtn");
+    const participantsDrawer = document.getElementById("participantsDrawer");
+    const output = document.getElementById("output");
+    const plist = document.getElementById("plist");
+
+    const sessionId = "{{ session_id }}";
+    const urlParams = new URLSearchParams(window.location.search);
+    const myName = urlParams.get("name") || "Anonymous";
+
+    let myRole = "participant";
+    let mySid = null;
+    let writerId = null;
+    let editor;
+
+    // Load Monaco Editor
+    require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs' }});
+    require(["vs/editor/editor.main"], function () {
+      editor = monaco.editor.create(document.getElementById("editor"), {
+        value: "",
+        language: "python",
+        theme: "vs-dark",
+        automaticLayout: true,
+        readOnly: true
+      });
+
+      // emit typing
+      editor.onDidChangeModelContent(() => {
+        if (mySid && mySid === writerId) {
+          socket.emit("code_change", { session_id: sessionId, content: editor.getValue() });
+        }
+      });
+    });
+
+    // join session
+    socket.emit("join_session", { session_id: sessionId, name: myName });
+
+    // store my socket.id when connected
+    socket.on("connect", () => {
+      mySid = socket.id;
+    });
+
+    // sync code
+    socket.on("code_update", data => {
+      if (editor && mySid !== writerId) {
+        editor.setValue(data.content);
+      }
+    });
+
+    // update participants
+    socket.on("participants_update", data => {
+      plist.innerHTML = "";
+      writerId = data.writer_id;
+      const hostId = data.host_id;
+
+      for (const [sid, info] of Object.entries(data.participants)) {
+        if (sid === mySid) myRole = info.role;
+
+        const li = document.createElement("li");
+
+        // Info
+        const infoDiv = document.createElement("div");
+        infoDiv.className = "p-info";
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "p-name";
+        nameSpan.textContent = info.name + (sid === writerId ? " ✏️" : "");
+        const roleSpan = document.createElement("span");
+        roleSpan.className = "p-role";
+        roleSpan.textContent = info.role;
+        infoDiv.appendChild(nameSpan);
+        infoDiv.appendChild(roleSpan);
+
+        // Actions
+        const actionsDiv = document.createElement("div");
+        actionsDiv.className = "p-actions";
+        if (myRole === "host" && sid !== hostId) {
+          const btn = document.createElement("button");
+          if (sid === writerId) {
+            btn.textContent = "Revoke";
+            btn.onclick = () => socket.emit("revoke_write", { session_id: sessionId });
+          } else {
+            btn.textContent = "Grant";
+            btn.onclick = () => socket.emit("grant_write", { session_id: sessionId, target_sid: sid });
+          }
+          actionsDiv.appendChild(btn);
+        }
+        if (myRole === "participant" && sid === mySid && sid !== writerId) {
+          const reqBtn = document.createElement("button");
+          reqBtn.textContent = "Request Edit";
+          reqBtn.onclick = () => socket.emit("request_write", { session_id: sessionId, name: myName, sid: mySid });
+          actionsDiv.appendChild(reqBtn);
+        }
+
+        li.appendChild(infoDiv);
+        li.appendChild(actionsDiv);
+        plist.appendChild(li);
+      }
+
+      // allow editing only if I'm the writer
+      if (editor) editor.updateOptions({ readOnly: mySid !== writerId });
+    });
+
+    // Run code
+    runBtn.onclick = async () => {
+      const resp = await fetch("/run_code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: editor.getValue() })
+      });
+      const data = await resp.json();
+      output.textContent = data.output;
+    };
+
+    // Clear code
+    clearBtn.onclick = () => {
+      if (mySid === writerId) {
+        editor.setValue("");
+        socket.emit("code_change", { session_id: sessionId, content: "" });
+      }
+    };
+  </script>
+</body>
+</html>

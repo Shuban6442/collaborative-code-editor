@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Session {{ room_id }} - Host</title>
+    <style>
+        html, body { height: 100%; }
+        body { font-family: Arial, sans-serif; margin: 16px; height: 100%; }
+        header { padding: 8px 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .pill { padding: 4px 8px; border-radius: 999px; border: 1px solid #ccc; }
+        .host-pill { background-color: #4CAF50; color: white; border-color: #4CAF50; }
+        #shareLink { width: 360px; max-width: 100%; padding: 6px; }
+        select, button { padding: 6px 10px; }
+        .spacer { flex: 1; }
+        #main { display: grid; grid-template-rows: 1fr 200px; height: 70vh; gap: 8px; position: relative; }
+        #editor { width: 100%; height: 100%; min-height: 300px; border: 1px solid #eee; position: relative; z-index: 2; background: #1e1e1e; }
+        #output { border-top: 1px solid #eee; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; position: relative; z-index: 1; }
+        #preview { width: 100%; border: 1px solid #eee; }
+        #console { padding: 8px; font-family: Consolas, monospace; font-size: 13px; white-space: pre-wrap; overflow: auto; border: 1px solid #eee; }
+        .muted { color: #666; font-size: 12px; }
+    </style>
+    <script>var require = { paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } };</script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <h2>Session: {{ room_id }} - Host View</h2>
+    <script id="initial-code" type="application/json">{{ initial_code | tojson }}</script>
+    <header>
+        <span id="rolePill" class="pill host-pill">Role: Host</span>
+        <input id="shareLink" type="text" value="{{ request.url }}" readonly>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('shareLink').value)">Copy Link</button>
+        <div class="spacer"></div>
+        <label>Language
+            <select id="language">
+                <option value="javascript">JavaScript</option>
+                <option value="typescript">TypeScript</option>
+                <option value="python">Python</option>
+                <option value="html">HTML</option>
+                <option value="css">CSS</option>
+                <option value="markdown">Markdown</option>
+            </select>
+        </label>
+        <span id="runNotice" class="muted">JS/HTML/CSS run in the sandbox below</span>
+        <button id="run">Run</button>
+        <button id="format">Format</button>
+        <button id="clear">Clear</button>
+    </header>
+
+    <h4>Participants</h4>
+    <ul id="participants">
+    {% for user in participants %}
+    <li>{{ user }}</li>
+    {% endfor %}
+    </ul>
+
+    <div id="main">
+        <div id="editor"></div>
+        <div id="output">
+            <iframe id="preview" sandbox="allow-scripts"></iframe>
+            <div id="console"></div>
+        </div>
+    </div>
+
+    <script>
+    const ROOM_ID = "{{ room_id }}";
+    let ROLE = 'Host';
+    let DESIRED_ROLE = 'Host';
+    let ROLE_ASSIGNED = true;
+    let DISPLAY_NAME = '';
+    let socket;
+    
+    // Ask for a display name
+    (function ensureName(){
+        try {
+            const stored = sessionStorage.getItem('display.name');
+            if (stored) { DISPLAY_NAME = stored; return; }
+        } catch(_) {}
+        const hint = 'Enter your display name (Host)';
+        const name = prompt(hint) || '';
+        DISPLAY_NAME = (name.trim() || 'Host');
+        try { sessionStorage.setItem('display.name', DISPLAY_NAME); } catch(_) {}
+    })();
+
+    function initSocket(){
+        console.log('Host: Initializing socket connection...');
+        if (socket) return;
+        if (!window.io) { 
+            console.log('Host: Socket.IO not loaded yet, retrying...');
+            setTimeout(initSocket, 200); 
+            return; 
+        }
+        try {
+            socket = io();
+            console.log('Host: Socket.IO connection created');
+        } catch(_) {
+            console.log('Host: Socket.IO connection failed, retrying...');
+            setTimeout(initSocket, 200);
+            return;
+        }
+        
+        // Register listeners BEFORE emitting join to avoid race
+        socket.on('role_assigned', data => {
+            ROLE = (data && data.role) || 'Host';
+            ROLE_ASSIGNED = true;
+            const pill = document.getElementById('rolePill');
+            if (pill) {
+                pill.textContent = 'Role: ' + ROLE;
+                if (ROLE === 'Host') {
+                    pill.className = 'pill host-pill';
+                }
+            }
+            if (monacoEditor) {
+                setControlsForRole();
+            }
+        });
+        
+        socket.on('participants_update', data => {
+            const ul = document.getElementById('participants');
+            while (ul.firstChild) ul.removeChild(ul.firstChild);
+            (data.participants || []).forEach(p => {
+                const li = document.createElement('li');
+                li.textContent = p;
+                ul.appendChild(li);
+            });
+        });
+        
+        socket.on('edit_rejected', data => {
+            console.warn(data && data.reason ? data.reason : 'Edit rejected');
+        });
+        
+        // Join room upon actual connection
+        socket.on('connect', () => {
+            console.log('Host: Connected to server, joining room:', ROOM_ID);
+            socket.emit('join_room', { room: ROOM_ID, name: DISPLAY_NAME, desired_role: 'Host' });
+        });
+    }
+    
+    initSocket();
+    
+    // Ask for current code after socket connects
+    var askTimer = setInterval(function(){
+        if (socket) { socket.emit('request_code', { room: ROOM_ID }); clearInterval(askTimer); }
+    }, 300);
+    
+    let monacoEditor;
+    let localEdit = false;
+
+    // If socket appears later (CDN delay), try again
+    setTimeout(initSocket, 500);
+
+    const initialLang = 'javascript';
+    document.getElementById('language').value = initialLang;
+
+    require(['vs/editor/editor.main'], function () {
+        const INITIAL_CODE = (function(){
+            try { return JSON.parse(document.getElementById('initial-code').textContent || '""'); }
+            catch(_) { return ''; }
+        })();
+        
+        monacoEditor = monaco.editor.create(document.getElementById('editor'), {
+            value: INITIAL_CODE,
+            language: initialLang,
+            theme: 'vs-dark',
+            automaticLayout: true,
+            minimap: { enabled: false }
+        });
+
+        // Host can always edit
+        monacoEditor.updateOptions({ readOnly: false });
+        setControlsForRole();
+
+        monacoEditor.onDidChangeModelContent(() => {
+            localEdit = true;
+            const code = monacoEditor.getValue();
+            console.log('Host sending code update:', { room: ROOM_ID, codeLength: code.length });
+            if (socket) socket.emit('code_update', { room: ROOM_ID, code });
+            setTimeout(() => { localEdit = false; }, 0);
+        });
+
+        document.getElementById('language').addEventListener('change', (e) => {
+            const lang = e.target.value;
+            monaco.editor.setModelLanguage(monacoEditor.getModel(), lang);
+            updateRunNotice(lang);
+        });
+
+        document.getElementById('format').addEventListener('click', () => {
+            if (monacoEditor) monacoEditor.getAction('editor.action.formatDocument').run();
+        });
+
+        document.getElementById('clear').addEventListener('click', () => {
+            monacoEditor.setValue('');
+        });
+
+        document.getElementById('run').addEventListener('click', () => {
+            runCode();
+        });
+
+        updateRunNotice(initialLang);
+    });
+
+    // Receive edits from others
+    function handleUpdateCode(data){
+        console.log('Host received code update:', data);
+        if (monacoEditor && !localEdit && monacoEditor.getValue() !== data.code) {
+            const pos = monacoEditor.getPosition();
+            monacoEditor.setValue(data.code);
+            if (pos) monacoEditor.setPosition(pos);
+            console.log('Host code updated in editor');
+        } else {
+            console.log('Host code update ignored - localEdit:', localEdit, 'same code:', monacoEditor.getValue() === data.code);
+        }
+    }
+    
+    if (socket) socket.on('update_code', handleUpdateCode);
+    else {
+        const waitAttach = setInterval(function(){
+            if (socket) { socket.on('update_code', handleUpdateCode); clearInterval(waitAttach); }
+        }, 200);
+    }
+
+    function updateRunNotice(lang) {
+        const notice = document.getElementById('runNotice');
+        if (['javascript', 'html', 'css'].includes(lang)) {
+            notice.textContent = 'JS/HTML/CSS run in the sandbox below';
+        } else if (lang === 'python') {
+            notice.textContent = 'Python runs on the server with a short timeout';
+        } else {
+            notice.textContent = 'Execution requires a backend. Ask to enable runner.';
+        }
+    }
+
+    function setControlsForRole() {
+        // Host always has all controls enabled
+        var ids = ['run','format','clear'];
+        ids.forEach(function(id){
+            var el = document.getElementById(id);
+            if (el) {
+                el.disabled = false;
+            }
+        });
+        var lang = document.getElementById('language');
+        if (lang) {
+            lang.disabled = false;
+        }
+        if (monacoEditor) {
+            monacoEditor.updateOptions({ readOnly: false });
+        }
+    }
+
+    function runCode() {
+        const lang = document.getElementById('language').value;
+        const code = monacoEditor ? monacoEditor.getValue() : '';
+        const iframe = document.getElementById('preview');
+        const consoleView = document.getElementById('console');
+        consoleView.textContent = 'Running...';
+
+        if (lang === 'javascript') {
+            const html = `<!doctype html><html><head><meta charset=\"utf-8\"></head><body><script>\n` +
+                         wrapConsoleForwarder() +
+                         `\ntry {` + code + `} catch(e){ console.error(e && (e.stack || e.toString())); }\nwindow.parent.postMessage({type:'practice-console', level:'info', args:['\u2713 Finished']}, '*');<\/script></body></html>`;
+            writeIframe(iframe, html);
+        } else if (lang === 'html') {
+            const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>` + code + `</body></html>`;
+            writeIframe(iframe, html);
+        } else if (lang === 'css') {
+            const html = `<!doctype html><html><head><meta charset="utf-8"><style>` + code + `</style></head><body><h4 style="font-family:sans-serif">CSS Preview</h4><p>Edit CSS to see styles.</p></body></html>`;
+            writeIframe(iframe, html);
+        } else if (lang === 'python') {
+            fetch('/run/python', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code })
+            }).then(r => r.json()).then(resp => {
+                const parts = [];
+                if (resp.stdout) parts.push('[stdout]\n' + resp.stdout.trim());
+                if (resp.stderr) parts.push('[stderr]\n' + resp.stderr.trim());
+                if (!resp.ok && resp.error) parts.push('[error]\n' + resp.error);
+                const out = parts.join('\n\n') || (resp.ok ? '✓ Finished (no output)' : 'No output');
+                consoleView.textContent = out;
+                writeIframe(iframe, `<!doctype html><html><body style=\"font-family:sans-serif; padding:8px\">Python does not render a visual preview. See console for output.</body></html>`);
+            }).catch(err => {
+                consoleView.textContent = 'Runner error: ' + (err && err.message ? err.message : String(err));
+            });
+        } else {
+            consoleView.textContent = 'Runner not available for this language. Ask to enable backend execution.';
+            writeIframe(iframe, `<!doctype html><html><body style=\"font-family:sans-serif\">No preview for this language.</body></html>`);
+        }
+
+        function writeIframe(ifr, html) {
+            try { ifr.srcdoc = html; }
+            catch (_) {
+                const doc = ifr.contentDocument || ifr.contentWindow.document;
+                doc.open(); doc.write(html); doc.close();
+            }
+        }
+
+        function wrapConsoleForwarder() {
+            return `
+            (function(){
+                function send(type, args){
+                    parent.postMessage({ type: 'practice-console', level: type, args: args.map(String) }, '*');
+                }
+                ['log','error','warn','info'].forEach(function(level){
+                    const orig = console[level];
+                    console[level] = function(){ try { send(level, Array.from(arguments)); } catch(_){}; orig.apply(console, arguments); };
+                });
+                window.addEventListener('error', function(e){
+                    try { send('error', [e.message + ' @ ' + (e.filename||'') + ':' + (e.lineno||'')]); } catch(_){}
+                });
+            })();`;
+        }
+    }
+
+    window.addEventListener('message', function(e){
+        const consoleView = document.getElementById('console');
+        const data = e.data || {};
+        if (data.type === 'practice-console') {
+            const line = `[${data.level}] ` + (data.args || []).join(' ');
+            consoleView.textContent += (consoleView.textContent ? '\n' : '') + line;
+        }
+    });
+    </script>
+</body>
+</html>

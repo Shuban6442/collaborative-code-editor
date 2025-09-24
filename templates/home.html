@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Collaborative IDE</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-light: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #3b82f6;
+      --border: #2a3342;
+      --shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      color: var(--text);
+      background: linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Topbar to match editor */
+    .topbar {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px;
+      background: rgba(17,24,39,0.9);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: 0.2px; }
+    .badge { color: var(--muted); font-weight: 500; }
+
+    /* Centered panel */
+    .wrap { flex: 1; display: grid; place-items: center; padding: 24px; }
+    .panel {
+      width: 100%; max-width: 720px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background:
+        radial-gradient(900px 300px at 10% -10%, rgba(59,130,246,0.12), transparent 40%),
+        radial-gradient(500px 240px at 90% -20%, rgba(16,185,129,0.12), transparent 30%),
+        var(--panel);
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+    h2 { margin: 0 0 8px 0; }
+    p { margin: 0 0 16px 0; color: var(--muted); }
+
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+    input {
+      padding: 10px 12px;
+      font-size: 14px;
+      color: var(--text);
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+    input:focus { border-color: #2a3b52; background: #0d1422; }
+
+    button {
+      padding: 10px 14px; font-size: 14px; color: var(--text);
+      background: linear-gradient(180deg, #2563eb 0%, #1e40af 100%);
+      border: 1px solid #2a3b52; border-radius: 8px; cursor: pointer;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+      transition: background 0.2s ease, transform 0.08s ease, border-color 0.2s ease;
+    }
+    button:hover { background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%); }
+    button:active { transform: translateY(1px); }
+    #createBtn { background: linear-gradient(180deg, #1e293b 0%, #111827 100%); border-color: var(--border); }
+    #createBtn:hover { background: linear-gradient(180deg, #253449 0%, #121a27 100%); border-color: #2a3b52; }
+
+    #sessionCode { width: 240px; }
+    #nameInput { width: 180px; }
+
+    @media (max-width: 720px) {
+      .panel { padding: 16px; }
+      #sessionCode, #nameInput { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">
+      <span>Collaborative IDE</span>
+      <span class="badge">Python</span>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="panel">
+      <h2>Collaborative IDE</h2>
+      <p>Enter your name and session code to join, or create a new session.</p>
+
+      <div class="row">
+        <input id="nameInput" type="text" placeholder="Your name" autocomplete="off">
+        <input id="sessionCode" type="text" placeholder="Session code (e.g. ab12cd)" autocomplete="off">
+        <button id="joinBtn">Join</button>
+        <button id="createBtn">Create New Session</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const nameInput = document.getElementById("nameInput");
+      const codeInput = document.getElementById("sessionCode");
+      const joinBtn = document.getElementById("joinBtn");
+      const createBtn = document.getElementById("createBtn");
+
+      function join() {
+        const name = (nameInput.value || "").trim();
+        const code = (codeInput.value || "").trim();
+        if (!name) { alert("Enter your name"); return; }
+        if (!code) { alert("Enter session code"); return; }
+        window.location.href = `/editor/${code}?name=${encodeURIComponent(name)}`;
+      }
+
+      joinBtn.onclick = join;
+      createBtn.onclick = async function() {
+        const name = (nameInput.value || "").trim();
+        if (!name) { alert("Enter your name"); return; }
+
+        const resp = await fetch("/create_session", { method: "POST" });
+        const data = await resp.json();
+        const code = data.session_id;
+        window.location.href = `/editor/${code}?name=${encodeURIComponent(name)}`;
+      }
+    })();
+  </script>
+</body>
+</html>
