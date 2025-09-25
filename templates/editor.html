@@ -129,6 +129,12 @@
         <button id="clearBtn" class="btn">Clear</button>
       </div>
       <div id="output"></div>
+
+      <!-- Input box for interactive programs -->
+      <div style="padding:10px; background:#111827;">
+        <input id="inputBox" type="text" placeholder="Type input..." style="width:70%;" />
+        <button id="sendInputBtn" class="btn">Send Input</button>
+      </div>
     </div>
 
     <div id="participantsDrawer">
@@ -146,6 +152,9 @@
     const output = document.getElementById("output");
     const plist = document.getElementById("plist");
     const writerBanner = document.getElementById("writerBanner");
+
+    const inputBox = document.getElementById("inputBox");
+    const sendInputBtn = document.getElementById("sendInputBtn");
 
     const sessionId = "{{ session_id }}";
     const urlParams = new URLSearchParams(window.location.search);
@@ -196,8 +205,6 @@
       writerId = data.writer_id;
       const hostId = data.host_id;
 
-      console.log("Current writerId =", writerId, " | mySid =", mySid);
-
       for (const [sid, info] of Object.entries(data.participants)) {
         if (sid === mySid) myRole = info.role;
 
@@ -244,7 +251,6 @@
         const isWriter = mySid === writerId;
         editor.updateOptions({ readOnly: !isWriter });
         writerBanner.style.display = isWriter ? "block" : "none";
-        console.log("Editor readOnly =", !isWriter);
       }
     });
 
@@ -253,10 +259,24 @@
       const resp = await fetch("/run_code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: editor.getValue() })
+        body: JSON.stringify({ code: editor.getValue(), session_id: sessionId })
       });
       const data = await resp.json();
       output.textContent = data.output;
+    };
+
+    // Handle streaming output from backend
+    socket.on("code_output", data => {
+      output.textContent += data.output;
+    });
+
+    // Send input to backend
+    sendInputBtn.onclick = () => {
+      const text = inputBox.value;
+      if (text.trim()) {
+        socket.emit("provide_input", { session_id: sessionId, text });
+        inputBox.value = "";
+      }
     };
 
     // Clear code
