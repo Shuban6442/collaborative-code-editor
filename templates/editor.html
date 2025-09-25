@@ -130,10 +130,9 @@
       </div>
       <div id="output"></div>
 
-      <!-- Input box for interactive programs -->
-      <div style="padding:10px; background:#111827;">
-        <input id="inputBox" type="text" placeholder="Type input..." style="width:70%;" />
-        <button id="sendInputBtn" class="btn">Send Input</button>
+      <!-- Hidden input area, appears only when program runs -->
+      <div id="inputArea" style="padding:10px; background:#111827; display:none;">
+        <input id="inputBox" type="text" placeholder="Type input..." style="width:100%;" />
       </div>
     </div>
 
@@ -153,8 +152,8 @@
     const plist = document.getElementById("plist");
     const writerBanner = document.getElementById("writerBanner");
 
+    const inputArea = document.getElementById("inputArea");
     const inputBox = document.getElementById("inputBox");
-    const sendInputBtn = document.getElementById("sendInputBtn");
 
     const sessionId = "{{ session_id }}";
     const urlParams = new URLSearchParams(window.location.search);
@@ -164,6 +163,7 @@
     let mySid = null;
     let writerId = null;
     let editor;
+    let running = false;
 
     // Load Monaco Editor
     require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs' }});
@@ -186,17 +186,11 @@
     // join session
     socket.emit("join_session", { session_id: sessionId, name: myName });
 
-    socket.on("connect", () => {
-      mySid = socket.id;
-    });
+    socket.on("connect", () => { mySid = socket.id; });
 
     // sync code
     socket.on("code_update", data => {
-      if (editor) {
-        if (mySid !== writerId) {
-          editor.setValue(data.content);
-        }
-      }
+      if (editor && mySid !== writerId) editor.setValue(data.content);
     });
 
     // update participants
@@ -209,7 +203,6 @@
         if (sid === mySid) myRole = info.role;
 
         const li = document.createElement("li");
-
         const infoDiv = document.createElement("div");
         infoDiv.className = "p-info";
         const nameSpan = document.createElement("span");
@@ -218,20 +211,15 @@
         const roleSpan = document.createElement("span");
         roleSpan.className = "p-role";
         roleSpan.textContent = info.role;
-        infoDiv.appendChild(nameSpan);
-        infoDiv.appendChild(roleSpan);
+        infoDiv.appendChild(nameSpan); infoDiv.appendChild(roleSpan);
 
         const actionsDiv = document.createElement("div");
         actionsDiv.className = "p-actions";
         if (myRole === "host" && sid !== hostId) {
           const btn = document.createElement("button");
-          if (sid === writerId) {
-            btn.textContent = "Revoke";
-            btn.onclick = () => socket.emit("revoke_write", { session_id: sessionId });
-          } else {
-            btn.textContent = "Grant";
-            btn.onclick = () => socket.emit("grant_write", { session_id: sessionId, target_sid: sid });
-          }
+          btn.textContent = sid === writerId ? "Revoke" : "Grant";
+          btn.onclick = () => socket.emit(sid === writerId ? "revoke_write" : "grant_write",
+                                           { session_id: sessionId, target_sid: sid });
           actionsDiv.appendChild(btn);
         }
         if (myRole === "participant" && sid === mySid && sid !== writerId) {
@@ -256,28 +244,39 @@
 
     // Run code
     runBtn.onclick = async () => {
+      running = true;
+      output.textContent = "[Program started]\n";
+      inputArea.style.display = "block";
+
       const resp = await fetch("/run_code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: editor.getValue(), session_id: sessionId })
       });
       const data = await resp.json();
-      output.textContent = data.output;
+      if (data.output) output.textContent += data.output;
     };
 
-    // Handle streaming output from backend
+    // Handle streaming output
     socket.on("code_output", data => {
       output.textContent += data.output;
+      // Auto-scroll
+      output.scrollTop = output.scrollHeight;
     });
 
-    // Send input to backend
-    sendInputBtn.onclick = () => {
-      const text = inputBox.value;
-      if (text.trim()) {
-        socket.emit("provide_input", { session_id: sessionId, text });
-        inputBox.value = "";
-      }
-    };
+    // Send input with Enter key
+    // Send input with Enter key
+    inputBox.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && running) {
+        const text = inputBox.value.trim();
+        if (text) {
+          socket.emit("provide_input", { session_id: sessionId, text });
+          inputBox.value = "";
+          output.textContent += `\n[Input sent: ${text}]\n`; // fixed
+          }
+        }
+      });
+
 
     // Clear code
     clearBtn.onclick = () => {
@@ -285,12 +284,13 @@
         editor.setValue("");
         socket.emit("code_change", { session_id: sessionId, content: "" });
       }
+      output.textContent = "";
+      inputArea.style.display = "none";
+      running = false;
     };
 
     // Toggle participants drawer
-    participantsBtn.addEventListener("click", () => {
-      participantsDrawer.classList.toggle("open");
-    });
+    participantsBtn.addEventListener("click", () => { participantsDrawer.classList.toggle("open"); });
   </script>
 </body>
 </html>
