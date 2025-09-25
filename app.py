@@ -4,20 +4,15 @@ from flask_socketio import SocketIO, emit, join_room
 import uuid
 import subprocess
 import tempfile
+import threading   # <-- added
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# sessions = {
-#   session_id: {
-#       "content": "",
-#       "participants": {sid: {"name": str, "role": "host"/"participant"}},
-#       "host_id": sid or None,
-#       "writer_id": sid or None
-#   }
-# }
 sessions = {}
+running_procs = {}   # <-- store processes per session
+
 # Each session will also store a list of chat messages:
 # sessions[session_id]["chat"] = [ {"sid": str, "name": str, "msg": str, "ts": float} ]
 
@@ -166,28 +161,54 @@ def handle_send_message(data):
 
     socketio.emit("chat_message", msg, room=session_id)
 
-
 @app.route("/run_code", methods=["POST"])
 def run_code():
     data = request.get_json()
     code = data.get("code", "")
+    session_id = data.get("session_id")
 
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".py") as tmp:
             tmp.write(code.encode("utf-8"))
             tmp.flush()
-            result = subprocess.run(
-                [sys.executable, tmp.name],   # <-- use current python interpreter
-                capture_output=True,
-                text=True,
-                timeout=5
-                )
-        output = result.stdout + result.stderr
+
+        # Start Python process
+        proc = subprocess.Popen(
+            [sys.executable, tmp.name],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        running_procs[session_id] = proc
+
+        # Background thread to stream stdout/stderr
+        def stream_output():
+            for line in proc.stdout:
+                socketio.emit("code_output", {"output": line}, room=session_id)
+            for line in proc.stderr:
+                socketio.emit("code_output", {"output": line}, room=session_id)
+
+        threading.Thread(target=stream_output, daemon=True).start()
+
+        return jsonify({"output": "Program started... waiting for input if required.\n"})
+
     except Exception as e:
-        output = str(e)
+        return jsonify({"output": str(e)})
 
-    return jsonify({"output": output})
+@socketio.on("provide_input")
+def handle_input(data):
+    session_id = data.get("session_id")
+    text = data.get("text", "")
 
+    proc = running_procs.get(session_id)
+    if proc and proc.poll() is None:
+        try:
+            proc.stdin.write(text + "\n")
+            proc.stdin.flush()
+        except Exception as e:
+            emit("code_output", {"output": f"Error sending input: {e}"}, room=session_id)
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
