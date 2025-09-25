@@ -1,20 +1,19 @@
 import sys
+import uuid
+import tempfile
+import threading
+import select
+import subprocess
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit, join_room
-import uuid
-import subprocess
-import tempfile
-import threading   # <-- added
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# --- In-memory session storage ---
 sessions = {}
-running_procs = {}   # <-- store processes per session
-
-# Each session will also store a list of chat messages:
-# sessions[session_id]["chat"] = [ {"sid": str, "name": str, "msg": str, "ts": float} ]
+running_procs = {}   # store currently running processes per session
 
 
 @app.route("/")
@@ -24,7 +23,7 @@ def index():
 
 @app.route("/create_session", methods=["POST"])
 def create_session():
-    """Create a session but don’t assign host yet — that happens on first join."""
+    """Create a new session with unique ID"""
     session_id = str(uuid.uuid4())[:6]
     sessions[session_id] = {
         "content": "",
@@ -41,6 +40,10 @@ def editor(session_id):
     if session_id not in sessions:
         return "Session not found", 404
     return render_template("editor.html", session_id=session_id)
+
+
+# ------------------ SocketIO events ------------------
+
 @socketio.on("join_session")
 def join_session(data):
     session_id = data.get("session_id")
@@ -56,16 +59,13 @@ def join_session(data):
 
     role = "participant"
     if sess["host_id"] is None:
-        # First person to join = Host + Writer
         sess["host_id"] = sid
         sess["writer_id"] = sid
         role = "host"
 
     sess["participants"][sid] = {"name": name, "role": role}
 
-    # Send current content + who is the writer
     emit("code_update", {"content": sess["content"]})
-    # Send chat history only to the newly joined client
     emit("chat_history", {"messages": sess.get("chat", [])})
     emit("participants_update", {
         "participants": sess["participants"],
@@ -83,7 +83,6 @@ def handle_code_change(data):
     if session_id not in sessions:
         emit("error", {"msg": "Session not found"})
         return
-
     if sessions[session_id]["writer_id"] != sid:
         emit("error", {"msg": "You are not the current writer"})
         return
@@ -109,7 +108,6 @@ def grant_write(data):
 def revoke_write(data):
     session_id = data.get("session_id")
     if session_id in sessions:
-        # always fallback to host
         sessions[session_id]["writer_id"] = sessions[session_id]["host_id"]
         socketio.emit("participants_update", {
             "participants": sessions[session_id]["participants"],
@@ -148,12 +146,11 @@ def handle_send_message(data):
         emit("error", {"msg": "Session not found"})
         return
     if not text:
-        return  # ignore empty
+        return
 
     from time import time
     msg = {"sid": sid, "name": name, "msg": text, "ts": time()}
     sess = sessions[session_id]
-    # Cap history to last 200 messages
     chat_list = sess.setdefault("chat", [])
     chat_list.append(msg)
     if len(chat_list) > 200:
@@ -161,6 +158,8 @@ def handle_send_message(data):
 
     socketio.emit("chat_message", msg, room=session_id)
 
+
+# ------------------ Code execution ------------------
 @app.route("/run_code", methods=["POST"])
 def run_code():
     data = request.get_json()
@@ -172,43 +171,48 @@ def run_code():
             tmp.write(code.encode("utf-8"))
             tmp.flush()
 
-        # Start Python process
         proc = subprocess.Popen(
-            [sys.executable, tmp.name],
+            [sys.executable, "-u", tmp.name],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             bufsize=1
         )
         running_procs[session_id] = proc
 
-        # Background thread to stream stdout/stderr
+        # Immediately notify that program started
+        socketio.emit("code_output", {"output": "[Program started]\n"}, room=session_id)
+
         def stream_output():
-            for line in proc.stdout:
-                socketio.emit("code_output", {"output": line}, room=session_id)
-            for line in proc.stderr:
-                socketio.emit("code_output", {"output": line}, room=session_id)
+            try:
+                for line in proc.stdout:
+                    if line == "":
+                        break
+                    socketio.emit("code_output", {"output": line}, room=session_id)
+            except Exception as e:
+                socketio.emit("code_output", {"output": f"[Error streaming output: {e}]\n"}, room=session_id)
 
         threading.Thread(target=stream_output, daemon=True).start()
-
-        return jsonify({"output": "Program started... waiting for input if required.\n"})
+        return jsonify({"output": ""})
 
     except Exception as e:
         return jsonify({"output": str(e)})
+
 
 @socketio.on("provide_input")
 def handle_input(data):
     session_id = data.get("session_id")
     text = data.get("text", "")
-
     proc = running_procs.get(session_id)
     if proc and proc.poll() is None:
         try:
             proc.stdin.write(text + "\n")
             proc.stdin.flush()
+            emit("code_output", {"output": f"[Input received: {text}]\n"}, room=session_id)
         except Exception as e:
-            emit("code_output", {"output": f"Error sending input: {e}"}, room=session_id)
+            emit("code_output", {"output": f"Error sending input: {e}\n"}, room=session_id)
+
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
