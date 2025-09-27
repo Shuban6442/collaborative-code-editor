@@ -106,6 +106,12 @@
       color: #fff;
       display: none;
     }
+
+    /* Mic bar */
+    #micControls { padding: 8px; background: #111827; display: flex; align-items: center; gap: 10px; }
+    #micButton.active { background: red; }
+    #micLevel { width: 200px; height: 10px; background: #333; border-radius: 4px; overflow: hidden; }
+    #micLevelFill { height: 100%; width: 0; background: #3b82f6; }
   </style>
 </head>
 <body>
@@ -119,7 +125,7 @@
     </div>
   </div>
 
-  <div id="writerBanner">✏️ You are the Writer</div>
+  <div id="writerBanner">✏ You are the Writer</div>
 
   <div class="container">
     <div class="left">
@@ -133,6 +139,12 @@
       <!-- Hidden input area, appears only when program runs -->
       <div id="inputArea" style="padding:10px; background:#111827; display:none;">
         <input id="inputBox" type="text" placeholder="Type input..." style="width:100%;" />
+      </div>
+
+      <!-- Mic controls -->
+      <div id="micControls">
+        <button id="micButton" class="btn">🎤 Mic Off</button>
+        <div id="micLevel"><div id="micLevelFill"></div></div>
       </div>
     </div>
 
@@ -207,7 +219,7 @@
         infoDiv.className = "p-info";
         const nameSpan = document.createElement("span");
         nameSpan.className = "p-name";
-        nameSpan.textContent = info.name + (sid === writerId ? " ✏️" : "");
+        nameSpan.textContent = info.name + (sid === writerId ? " ✏" : "");
         const roleSpan = document.createElement("span");
         roleSpan.className = "p-role";
         roleSpan.textContent = info.role;
@@ -234,7 +246,6 @@
         plist.appendChild(li);
       }
 
-      // Update editor permission + banner
       if (editor) {
         const isWriter = mySid === writerId;
         editor.updateOptions({ readOnly: !isWriter });
@@ -257,15 +268,11 @@
       if (data.output) output.textContent += data.output;
     };
 
-    // Handle streaming output
     socket.on("code_output", data => {
       output.textContent += data.output;
-      // Auto-scroll
       output.scrollTop = output.scrollHeight;
     });
 
-    // Send input with Enter key
-    // Send input with Enter key
     inputBox.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && running) {
         const text = inputBox.value.trim();
@@ -278,7 +285,6 @@
       });
 
 
-    // Clear code
     clearBtn.onclick = () => {
       if (mySid === writerId) {
         editor.setValue("");
@@ -289,8 +295,136 @@
       running = false;
     };
 
-    // Toggle participants drawer
     participantsBtn.addEventListener("click", () => { participantsDrawer.classList.toggle("open"); });
+
+    // ---------------- MIC + WebRTC ----------------
+    const micButton = document.getElementById("micButton");
+    const micLevelFill = document.getElementById("micLevelFill");
+    let localStream = null;
+    let pcPeers = {};
+    let audioContext, analyser, source, dataArray;
+
+    micButton.onclick = async () => {
+      if (micButton.classList.contains("active")) {
+        stopMic();
+      } else {
+        await startMic();
+      }
+    };
+
+    async function startMic() {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micButton.classList.add("active");
+        micButton.textContent = "🎤 Mic On";
+
+        audioContext = new AudioContext();
+        analyser = audioContext.createAnalyser();
+        source = audioContext.createMediaStreamSource(localStream);
+        source.connect(analyser);
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+        requestAnimationFrame(updateMicLevel);
+
+        socket.emit("webrtc_join", { session_id: sessionId });
+        socket.emit("request_audio_peers", { session_id: sessionId });
+      } catch (err) {
+        console.error("Mic error", err);
+      }
+    }
+
+    function stopMic() {
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      micButton.classList.remove("active");
+      micButton.textContent = "🎤 Mic Off";
+    }
+
+    function updateMicLevel() {
+      if (!analyser) return;
+      analyser.getByteFrequencyData(dataArray);
+      let avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
+      micLevelFill.style.width = (avg / 2) + "px";
+      requestAnimationFrame(updateMicLevel);
+    }
+
+    async function createPeerConnection(peerId) {
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+      pcPeers[peerId] = pc;
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("webrtc_ice_candidate", { target: peerId, candidate: event.candidate });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        let audioElem = document.getElementById("remoteAudio_" + peerId);
+        if (!audioElem) {
+          audioElem = document.createElement("audio");
+          audioElem.id = "remoteAudio_" + peerId;
+          audioElem.autoplay = true;
+          document.body.appendChild(audioElem);
+        }
+        audioElem.srcObject = event.streams[0];
+      };
+      return pc;
+    }
+
+    socket.on("new_peer", async (data) => {
+      const peerId = data.sid;
+      if (!localStream) return;
+      const pc = await createPeerConnection(peerId);
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit("webrtc_offer", { target: peerId, sdp: pc.localDescription });
+    });
+
+    socket.on("audio_peers_list", async (data) => {
+      for (const peerId of data.peers) {
+        const pc = await createPeerConnection(peerId);
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("webrtc_offer", { target: peerId, sdp: pc.localDescription });
+      }
+    });
+
+    socket.on("webrtc_offer", async (data) => {
+      const { sid, sdp } = data;
+      const pc = await createPeerConnection(sid);
+      if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      }
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("webrtc_answer", { target: sid, sdp: pc.localDescription });
+    });
+
+    socket.on("webrtc_answer", async (data) => {
+      const { sid, sdp } = data;
+      const pc = pcPeers[sid];
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      }
+    });
+
+    socket.on("webrtc_ice_candidate", async (data) => {
+      const { sid, candidate } = data;
+      const pc = pcPeers[sid];
+      if (pc && candidate) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.error("ICE error", err);
+        }
+      }
+    });
   </script>
 </body>
 </html>
