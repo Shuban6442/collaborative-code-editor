@@ -69,7 +69,7 @@ def join_session(data):
     # send full state to joining client
     emit("code_update", {"content": sess["content"]})
     emit("chat_history", {"messages": sess.get("chat", [])})
-    # notify all in room about participants (including the new one)
+    # notify all in room about participants
     emit("participants_update", {
         "participants": sess["participants"],
         "writer_id": sess["writer_id"],
@@ -122,11 +122,9 @@ def revoke_write(data):
 @socketio.on("disconnect")
 def handle_disconnect():
     sid = request.sid
-    # remove participant from any session they were in
     for session_id, session in sessions.items():
         if sid in session["participants"]:
             del session["participants"][sid]
-            # notify others in room
             if session["host_id"] == sid:
                 session["host_id"] = None
                 session["writer_id"] = None
@@ -137,7 +135,6 @@ def handle_disconnect():
                 "writer_id": session["writer_id"],
                 "host_id": session["host_id"]
             }, room=session_id)
-            # let others know a peer left audio (if they had joined audio)
             emit("peer_left", {"sid": sid}, room=session_id, include_self=False)
             break
 
@@ -165,31 +162,30 @@ def handle_send_message(data):
     socketio.emit("chat_message", msg, room=session_id)
 
 
-# ------------------ WebRTC signaling handlers ------------------
+# ------------------ WebRTC signaling ------------------
 
 @socketio.on("webrtc_offer")
 def handle_webrtc_offer(data):
     target = data.get("target")
     sdp = data.get("sdp")
-    emit("webrtc_offer", {"sdp": sdp, "sid": request.sid}, room=target)
+    emit("webrtc_offer", {"sdp": sdp, "sid": request.sid}, to=target)
 
 @socketio.on("webrtc_answer")
 def handle_webrtc_answer(data):
     target = data.get("target")
     sdp = data.get("sdp")
-    emit("webrtc_answer", {"sdp": sdp, "sid": request.sid}, room=target)
+    emit("webrtc_answer", {"sdp": sdp, "sid": request.sid}, to=target)
 
 @socketio.on("webrtc_ice_candidate")
 def handle_webrtc_ice_candidate(data):
     target = data.get("target")
     candidate = data.get("candidate")
-    emit("webrtc_ice_candidate", {"candidate": candidate, "sid": request.sid}, room=target)
+    emit("webrtc_ice_candidate", {"candidate": candidate, "sid": request.sid}, to=target)
 
 @socketio.on("webrtc_join")
 def handle_webrtc_join(data):
     session_id = data.get("session_id")
     join_room(session_id)
-    # Notify others
     emit("new_peer", {"sid": request.sid}, room=session_id, include_self=False)
 
 @socketio.on("request_audio_peers")
@@ -203,6 +199,7 @@ def handle_request_audio_peers(data):
 
 
 # ------------------ Code execution ------------------
+
 @app.route("/run_code", methods=["POST"])
 def run_code():
     data = request.get_json()
@@ -215,7 +212,7 @@ def run_code():
             tmp.flush()
 
         proc = subprocess.Popen(
-            [sys.executable, "-u", tmp.name],  # -u makes stdin/stdout unbuffered
+            [sys.executable, "-u", tmp.name],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -224,7 +221,6 @@ def run_code():
         )
         running_procs[session_id] = proc
 
-        # Notify participants
         socketio.emit("code_output", {"output": "[Program started]\n"}, room=session_id)
 
         def stream_output():
@@ -265,5 +261,4 @@ def handle_input(data):
 
 
 if __name__ == "__main__":
-    # run: python app.py
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
