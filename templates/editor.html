@@ -15,99 +15,28 @@
       --accent: #3b82f6;
       --border: #2a3342;
     }
-
-    body {
-      margin: 0;
-      font-family: system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-
-    .topbar {
-      display: flex;
-      justify-content: space-between;
-      padding: 10px 16px;
-      background: #111827;
-      border-bottom: 1px solid var(--border);
-    }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    .topbar { display: flex; justify-content: space-between; padding: 10px 16px; background: #111827; border-bottom: 1px solid var(--border); }
     .brand { display: flex; gap: 10px; }
     .session-code { background: #1f2937; padding: 4px 8px; border-radius: 6px; }
     .actions { display: flex; gap: 8px; }
-
     .container { display: flex; height: calc(100vh - 50px); }
     .left { flex: 1; display: flex; flex-direction: column; }
     #editor { flex: 1; border-bottom: 1px solid var(--border); }
     .toolbar { padding: 8px; background: #111827; }
-    .btn {
-      padding: 6px 12px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      background: #1f2937;
-      color: var(--text);
-      cursor: pointer;
-    }
+    .btn { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: #1f2937; color: var(--text); cursor: pointer; }
     .btn.primary { background: #2563eb; border-color: #2563eb; }
-
-    #output {
-      padding: 10px;
-      background: #0b1220;
-      border-top: 1px solid var(--border);
-      min-height: 80px;
-      white-space: pre-wrap;
-      font-family: monospace;
-    }
-
-    /* Participants drawer */
-    #participantsDrawer {
-      width: 320px;
-      border-left: 1px solid var(--border);
-      background: #0b1220;
-      display: flex;
-      flex-direction: column;
-      transition: transform 0.3s ease;
-      transform: translateX(100%);
-    }
-    #participantsDrawer.open {
-      transform: translateX(0);
-    }
-    
+    #output { padding: 10px; background: #0b1220; border-top: 1px solid var(--border); min-height: 80px; white-space: pre-wrap; font-family: monospace; }
+    #participantsDrawer { width: 320px; border-left: 1px solid var(--border); background: #0b1220; display: flex; flex-direction: column; transition: transform 0.3s ease; transform: translateX(100%); }
+    #participantsDrawer.open { transform: translateX(0); }
     #plist { list-style: none; margin: 0; padding: 12px; flex: 1; overflow-y: auto; }
-    #plist li {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px;
-      margin-bottom: 8px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: #111827;
-    }
+    #plist li { display: flex; justify-content: space-between; align-items: center; padding: 10px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 8px; background: #111827; }
     .p-info { display: flex; flex-direction: column; }
     .p-name { font-weight: 500; }
     .p-role { font-size: 12px; color: var(--muted); }
-    .p-actions button {
-      margin-left: 6px;
-      padding: 4px 8px;
-      font-size: 12px;
-      border-radius: 6px;
-      border: 1px solid #2a3b52;
-      background: #1e293b;
-      color: #e5e7eb;
-      cursor: pointer;
-    }
+    .p-actions button { margin-left: 6px; padding: 4px 8px; font-size: 12px; border-radius: 6px; border: 1px solid #2a3b52; background: #1e293b; color: #e5e7eb; cursor: pointer; }
     .p-actions button:hover { background: #2563eb; border-color: #2563eb; }
-
-    /* Writer banner */
-    #writerBanner {
-      text-align: center;
-      padding: 6px;
-      font-weight: bold;
-      background: #1e3a8a;
-      color: #fff;
-      display: none;
-    }
-
-    /* Mic bar */
+    #writerBanner { text-align: center; padding: 6px; font-weight: bold; background: #1e3a8a; color: #fff; display: none; }
     #micControls { padding: 8px; background: #111827; display: flex; align-items: center; gap: 10px; }
     #micButton.active { background: red; }
     #micLevel { width: 200px; height: 10px; background: #333; border-radius: 4px; overflow: hidden; }
@@ -120,9 +49,7 @@
       <span class="session-code">Session {{ session_id }}</span>
       <span class="badge">Python</span>
     </div>
-    <div class="actions">
-      <button id="participantsBtn" class="btn">Participants</button>
-    </div>
+    <div class="actions"><button id="participantsBtn" class="btn">Participants</button></div>
   </div>
 
   <div id="writerBanner">✏ You are the Writer</div>
@@ -135,19 +62,14 @@
         <button id="clearBtn" class="btn">Clear</button>
       </div>
       <div id="output"></div>
-
-      <!-- Hidden input area -->
       <div id="inputArea" style="padding:10px; background:#111827; display:none;">
         <input id="inputBox" type="text" placeholder="Type input..." style="width:100%;" />
       </div>
-
-      <!-- Mic controls -->
       <div id="micControls">
         <button id="micButton" class="btn">🎤 Mic Off</button>
         <div id="micLevel"><div id="micLevelFill"></div></div>
       </div>
     </div>
-
     <div id="participantsDrawer">
       <h3 style="padding:12px; margin:0; border-bottom:1px solid var(--border);">Participants</h3>
       <ul id="plist"></ul>
@@ -156,181 +78,63 @@
 
   <script>
     const socket = io();
-    const runBtn = document.getElementById("runBtn");
-    const clearBtn = document.getElementById("clearBtn");
-    const participantsBtn = document.getElementById("participantsBtn");
-    const participantsDrawer = document.getElementById("participantsDrawer");
-    const output = document.getElementById("output");
-    const plist = document.getElementById("plist");
-    const writerBanner = document.getElementById("writerBanner");
-
-    const inputArea = document.getElementById("inputArea");
-    const inputBox = document.getElementById("inputBox");
-
     const sessionId = "{{ session_id }}";
     const urlParams = new URLSearchParams(window.location.search);
     const myName = urlParams.get("name") || "Anonymous";
 
-    let myRole = "participant";
-    let mySid = null;
-    let writerId = null;
-    let editor;
-    let running = false;
+    let mySid = null, writerId = null, editor, running = false;
+    let localStream = null, pcPeers = {};
+    let audioContext, analyser, dataArray;
 
-    // Load Monaco Editor
+    // ================== MONACO ==================
     require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs' }});
     require(["vs/editor/editor.main"], function () {
       editor = monaco.editor.create(document.getElementById("editor"), {
-        value: "",
-        language: "python",
-        theme: "vs-dark",
-        automaticLayout: true,
-        readOnly: true
+        value: "", language: "python", theme: "vs-dark", automaticLayout: true, readOnly: true
       });
-
       editor.onDidChangeModelContent(() => {
-        if (mySid && mySid === writerId) {
-          socket.emit("code_change", { session_id: sessionId, content: editor.getValue() });
-        }
+        if (mySid && mySid === writerId) socket.emit("code_change", { session_id: sessionId, content: editor.getValue() });
       });
     });
 
-    // join session
     socket.emit("join_session", { session_id: sessionId, name: myName });
     socket.on("connect", () => { mySid = socket.id; });
 
-    // sync code
-    socket.on("code_update", data => {
-      if (editor && mySid !== writerId) editor.setValue(data.content);
-    });
-
-    // participants
     socket.on("participants_update", data => {
-      plist.innerHTML = "";
       writerId = data.writer_id;
-      const hostId = data.host_id;
-
-      for (const [sid, info] of Object.entries(data.participants)) {
-        if (sid === mySid) myRole = info.role;
-
-        const li = document.createElement("li");
-        const infoDiv = document.createElement("div");
-        infoDiv.className = "p-info";
-        const nameSpan = document.createElement("span");
-        nameSpan.className = "p-name";
-        nameSpan.textContent = info.name + (sid === writerId ? " ✏" : "");
-        const roleSpan = document.createElement("span");
-        roleSpan.className = "p-role";
-        roleSpan.textContent = info.role;
-        infoDiv.appendChild(nameSpan); infoDiv.appendChild(roleSpan);
-
-        const actionsDiv = document.createElement("div");
-        actionsDiv.className = "p-actions";
-        if (myRole === "host" && sid !== hostId) {
-          const btn = document.createElement("button");
-          btn.textContent = sid === writerId ? "Revoke" : "Grant";
-          btn.onclick = () => socket.emit(sid === writerId ? "revoke_write" : "grant_write",
-                                           { session_id: sessionId, target_sid: sid });
-          actionsDiv.appendChild(btn);
-        }
-
-        li.appendChild(infoDiv);
-        li.appendChild(actionsDiv);
-        plist.appendChild(li);
-      }
-
-      if (editor) {
-        const isWriter = mySid === writerId;
-        editor.updateOptions({ readOnly: !isWriter });
-        writerBanner.style.display = isWriter ? "block" : "none";
-      }
+      if (editor) editor.updateOptions({ readOnly: mySid !== writerId });
+      document.getElementById("writerBanner").style.display = (mySid === writerId) ? "block" : "none";
     });
 
-    // Run code
-    runBtn.onclick = async () => {
-      running = true;
-      output.textContent = "[Program started]\n";
-      inputArea.style.display = "block";
-
-      const resp = await fetch("/run_code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: editor.getValue(), session_id: sessionId })
-      });
-      const data = await resp.json();
-      if (data.output) output.textContent += data.output;
-    };
-
-    socket.on("code_output", data => {
-      output.textContent += data.output;
-      output.scrollTop = output.scrollHeight;
-    });
-
-    inputBox.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && running) {
-        const text = inputBox.value.trim();
-        if (text) {
-          socket.emit("provide_input", { session_id: sessionId, text });
-          inputBox.value = "";
-          output.textContent += `\n[Input sent: ${text}]\n`;
-        }
-      }
-    });
-
-    clearBtn.onclick = () => {
-      if (mySid === writerId) {
-        editor.setValue("");
-        socket.emit("code_change", { session_id: sessionId, content: "" });
-      }
-      output.textContent = "";
-      inputArea.style.display = "none";
-      running = false;
-    };
-
-    participantsBtn.addEventListener("click", () => { participantsDrawer.classList.toggle("open"); });
-
-    // ---------------- MIC + WebRTC ----------------
+    // ================== MIC + WEBRTC ==================
     const micButton = document.getElementById("micButton");
     const micLevelFill = document.getElementById("micLevelFill");
-    let localStream = null;
-    let pcPeers = {};
-    let audioContext, analyser, source, dataArray;
 
     micButton.onclick = async () => {
-      if (micButton.classList.contains("active")) {
-        stopMic();
-      } else {
-        await startMic();
-      }
+      if (micButton.classList.contains("active")) stopMic();
+      else await startMic();
     };
 
     async function startMic() {
       try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        micButton.classList.add("active");
-        micButton.textContent = "🎤 Mic On";
+        micButton.classList.add("active"); micButton.textContent = "🎤 Mic On";
 
         audioContext = new AudioContext();
+        const source = audioContext.createMediaStreamSource(localStream);
         analyser = audioContext.createAnalyser();
-        source = audioContext.createMediaStreamSource(localStream);
         source.connect(analyser);
         dataArray = new Uint8Array(analyser.frequencyBinCount);
         requestAnimationFrame(updateMicLevel);
 
         socket.emit("webrtc_join", { session_id: sessionId });
         socket.emit("request_audio_peers", { session_id: sessionId });
-      } catch (err) {
-        console.error("Mic error", err);
-      }
+      } catch (err) { console.error("Mic error", err); }
     }
 
     function stopMic() {
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-      }
-      micButton.classList.remove("active");
-      micButton.textContent = "🎤 Mic Off";
+      if (localStream) { localStream.getTracks().forEach(track => track.stop()); localStream = null; }
+      micButton.classList.remove("active"); micButton.textContent = "🎤 Mic Off";
     }
 
     function updateMicLevel() {
@@ -343,16 +147,17 @@
 
     async function createPeerConnection(peerId) {
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "turn:relay1.expressturn.com:3478", username: "efault", credential: "password" },
+          { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" }
+        ]
       });
       pcPeers[peerId] = pc;
 
       pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit("webrtc_ice_candidate", { target: peerId, candidate: event.candidate });
-        }
+        if (event.candidate) socket.emit("webrtc_ice_candidate", { target: peerId, candidate: event.candidate });
       };
-
       pc.ontrack = (event) => {
         let audioElem = document.getElementById("remoteAudio_" + peerId);
         if (!audioElem) {
@@ -362,7 +167,7 @@
           audioElem.playsInline = true;
           document.body.appendChild(audioElem);
         }
-        console.log("🎧 Playing remote audio from peer:", peerId);
+        console.log("🎧 Remote audio from peer:", peerId);
         audioElem.srcObject = event.streams[0];
       };
       return pc;
@@ -391,9 +196,7 @@
     socket.on("webrtc_offer", async (data) => {
       const { sid, sdp } = data;
       const pc = await createPeerConnection(sid);
-      if (localStream) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-      }
+      if (localStream) localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -403,20 +206,15 @@
     socket.on("webrtc_answer", async (data) => {
       const { sid, sdp } = data;
       const pc = pcPeers[sid];
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-      }
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     });
 
     socket.on("webrtc_ice_candidate", async (data) => {
       const { sid, candidate } = data;
       const pc = pcPeers[sid];
       if (pc && candidate) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (err) {
-          console.error("ICE error", err);
-        }
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+        catch (err) { console.error("ICE error", err); }
       }
     });
   </script>
