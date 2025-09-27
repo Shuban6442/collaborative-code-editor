@@ -2,8 +2,9 @@ import sys
 import uuid
 import tempfile
 import threading
-import select
 import subprocess
+from time import time
+
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit, join_room
 
@@ -65,8 +66,10 @@ def join_session(data):
 
     sess["participants"][sid] = {"name": name, "role": role}
 
+    # send full state to joining client
     emit("code_update", {"content": sess["content"]})
     emit("chat_history", {"messages": sess.get("chat", [])})
+    # notify all in room about participants (including the new one)
     emit("participants_update", {
         "participants": sess["participants"],
         "writer_id": sess["writer_id"],
@@ -119,9 +122,11 @@ def revoke_write(data):
 @socketio.on("disconnect")
 def handle_disconnect():
     sid = request.sid
+    # remove participant from any session they were in
     for session_id, session in sessions.items():
         if sid in session["participants"]:
             del session["participants"][sid]
+            # notify others in room
             if session["host_id"] == sid:
                 session["host_id"] = None
                 session["writer_id"] = None
@@ -132,6 +137,8 @@ def handle_disconnect():
                 "writer_id": session["writer_id"],
                 "host_id": session["host_id"]
             }, room=session_id)
+            # let others know a peer left audio (if they had joined audio)
+            emit("peer_left", {"sid": sid}, room=session_id, include_self=False)
             break
 
 
@@ -148,7 +155,6 @@ def handle_send_message(data):
     if not text:
         return
 
-    from time import time
     msg = {"sid": sid, "name": name, "msg": text, "ts": time()}
     sess = sessions[session_id]
     chat_list = sess.setdefault("chat", [])
@@ -157,6 +163,43 @@ def handle_send_message(data):
         del chat_list[0:len(chat_list)-200]
 
     socketio.emit("chat_message", msg, room=session_id)
+
+
+# ------------------ WebRTC signaling handlers ------------------
+
+@socketio.on("webrtc_offer")
+def handle_webrtc_offer(data):
+    target = data.get("target")
+    sdp = data.get("sdp")
+    emit("webrtc_offer", {"sdp": sdp, "sid": request.sid}, room=target)
+
+@socketio.on("webrtc_answer")
+def handle_webrtc_answer(data):
+    target = data.get("target")
+    sdp = data.get("sdp")
+    emit("webrtc_answer", {"sdp": sdp, "sid": request.sid}, room=target)
+
+@socketio.on("webrtc_ice_candidate")
+def handle_webrtc_ice_candidate(data):
+    target = data.get("target")
+    candidate = data.get("candidate")
+    emit("webrtc_ice_candidate", {"candidate": candidate, "sid": request.sid}, room=target)
+
+@socketio.on("webrtc_join")
+def handle_webrtc_join(data):
+    session_id = data.get("session_id")
+    join_room(session_id)
+    # Notify others
+    emit("new_peer", {"sid": request.sid}, room=session_id, include_self=False)
+
+@socketio.on("request_audio_peers")
+def handle_request_audio_peers(data):
+    session_id = data.get("session_id")
+    sid = request.sid
+    if not session_id or session_id not in sessions:
+        return
+    peers = [pid for pid in sessions[session_id]["participants"].keys() if pid != sid]
+    emit("audio_peers_list", {"peers": peers})
 
 
 # ------------------ Code execution ------------------
@@ -172,7 +215,7 @@ def run_code():
             tmp.flush()
 
         proc = subprocess.Popen(
-            [sys.executable, "-u", tmp.name],
+            [sys.executable, "-u", tmp.name],  # -u makes stdin/stdout unbuffered
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -181,17 +224,22 @@ def run_code():
         )
         running_procs[session_id] = proc
 
-        # Immediately notify that program started
+        # Notify participants
         socketio.emit("code_output", {"output": "[Program started]\n"}, room=session_id)
 
         def stream_output():
             try:
                 for line in proc.stdout:
-                    if line == "":
-                        break
                     socketio.emit("code_output", {"output": line}, room=session_id)
             except Exception as e:
-                socketio.emit("code_output", {"output": f"[Error streaming output: {e}]\n"}, room=session_id)
+                socketio.emit("code_output", {"output": f"[Error: {e}]\n"}, room=session_id)
+            finally:
+                try:
+                    proc.stdout.close()
+                except Exception:
+                    pass
+                running_procs.pop(session_id, None)
+                socketio.emit("code_output", {"output": "[Program finished]\n"}, room=session_id)
 
         threading.Thread(target=stream_output, daemon=True).start()
         return jsonify({"output": ""})
@@ -212,7 +260,10 @@ def handle_input(data):
             emit("code_output", {"output": f"[Input received: {text}]\n"}, room=session_id)
         except Exception as e:
             emit("code_output", {"output": f"Error sending input: {e}\n"}, room=session_id)
+    else:
+        emit("code_output", {"output": "[No running process to send input]\n"}, room=session_id)
 
 
 if __name__ == "__main__":
+    # run: python app.py
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
