@@ -136,7 +136,7 @@
       </div>
       <div id="output"></div>
 
-      <!-- Hidden input area, appears only when program runs -->
+      <!-- Hidden input area -->
       <div id="inputArea" style="padding:10px; background:#111827; display:none;">
         <input id="inputBox" type="text" placeholder="Type input..." style="width:100%;" />
       </div>
@@ -197,7 +197,6 @@
 
     // join session
     socket.emit("join_session", { session_id: sessionId, name: myName });
-
     socket.on("connect", () => { mySid = socket.id; });
 
     // sync code
@@ -205,7 +204,7 @@
       if (editor && mySid !== writerId) editor.setValue(data.content);
     });
 
-    // update participants
+    // participants
     socket.on("participants_update", data => {
       plist.innerHTML = "";
       writerId = data.writer_id;
@@ -233,12 +232,6 @@
           btn.onclick = () => socket.emit(sid === writerId ? "revoke_write" : "grant_write",
                                            { session_id: sessionId, target_sid: sid });
           actionsDiv.appendChild(btn);
-        }
-        if (myRole === "participant" && sid === mySid && sid !== writerId) {
-          const reqBtn = document.createElement("button");
-          reqBtn.textContent = "Request Edit";
-          reqBtn.onclick = () => socket.emit("request_write", { session_id: sessionId, name: myName, sid: mySid });
-          actionsDiv.appendChild(reqBtn);
         }
 
         li.appendChild(infoDiv);
@@ -279,11 +272,10 @@
         if (text) {
           socket.emit("provide_input", { session_id: sessionId, text });
           inputBox.value = "";
-          output.textContent += `\n[Input sent: ${text}]\n`; // fixed
-          }
+          output.textContent += `\n[Input sent: ${text}]\n`;
         }
-      });
-
+      }
+    });
 
     clearBtn.onclick = () => {
       if (mySid === writerId) {
@@ -367,8 +359,10 @@
           audioElem = document.createElement("audio");
           audioElem.id = "remoteAudio_" + peerId;
           audioElem.autoplay = true;
+          audioElem.playsInline = true;
           document.body.appendChild(audioElem);
         }
+        console.log("🎧 Playing remote audio from peer:", peerId);
         audioElem.srcObject = event.streams[0];
       };
       return pc;
