@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -292,8 +293,8 @@
     // ---------------- MIC + WebRTC ----------------
     const micButton = document.getElementById("micButton");
     const micLevelFill = document.getElementById("micLevelFill");
-    let localStream = null;
-    let pcPeers = {};
+    let localStream = null; // user mic stream when enabled
+    let pcPeers = {};       // peerId -> RTCPeerConnection
     let audioContext, analyser, source, dataArray;
 
     micButton.onclick = async () => {
@@ -317,15 +318,24 @@
         dataArray = new Uint8Array(analyser.frequencyBinCount);
         requestAnimationFrame(updateMicLevel);
 
-        socket.emit("webrtc_join", { session_id: sessionId });
-        socket.emit("request_audio_peers", { session_id: sessionId });
+        // Add audio tracks to all existing peer connections and renegotiate
+        for (const [peerId, pc] of Object.entries(pcPeers)) {
+          localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+          await renegotiateWithPeer(peerId);
+        }
       } catch (err) {
         console.error("Mic error", err);
       }
     }
 
-    function stopMic() {
+    async function stopMic() {
       if (localStream) {
+        // Remove senders from each peer
+        for (const [peerId, pc] of Object.entries(pcPeers)) {
+          const senders = pc.getSenders().filter(s => s.track && s.track.kind === "audio");
+          senders.forEach(s => pc.removeTrack(s));
+          await renegotiateWithPeer(peerId).catch(() => {});
+        }
         localStream.getTracks().forEach(track => track.stop());
         localStream = null;
       }
@@ -342,11 +352,12 @@
     }
 
     async function createPeerConnection(peerId) {
+      if (pcPeers[peerId]) return pcPeers[peerId];
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: "stun:stun.l.google.com:19302" },
-          { urls: "turn:relay1.expressturn.com:3478", username: "efault", credential: "password" },
-          { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" }
+          // Public TURN for testing; for production use your own TURN
+          { urls: ["turn:openrelay.metered.ca:80","turn:openrelay.metered.ca:443","turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" }
         ]
       });
       pcPeers[peerId] = pc;
@@ -364,6 +375,7 @@
           audioElem.id = "remoteAudio_" + peerId;
           audioElem.autoplay = true;
           audioElem.playsInline = true;
+          audioElem.muted = false;
           document.body.appendChild(audioElem);
         }
         console.log("🎧 Playing remote audio from peer:", peerId);
@@ -372,23 +384,30 @@
       return pc;
     }
 
-    socket.on("new_peer", async (data) => {
-      const peerId = data.sid;
-      if (!localStream) return;
-      const pc = await createPeerConnection(peerId);
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    async function renegotiateWithPeer(peerId) {
+      const pc = pcPeers[peerId];
+      if (!pc) return;
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       socket.emit("webrtc_offer", { target: peerId, sdp: pc.localDescription });
+    }
+
+    socket.on("new_peer", async (data) => {
+      const peerId = data.sid;
+      const pc = await createPeerConnection(peerId);
+      if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      }
+      await renegotiateWithPeer(peerId);
     });
 
     socket.on("audio_peers_list", async (data) => {
       for (const peerId of data.peers) {
         const pc = await createPeerConnection(peerId);
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit("webrtc_offer", { target: peerId, sdp: pc.localDescription });
+        if (localStream) {
+          localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        }
+        await renegotiateWithPeer(peerId);
       }
     });
 
@@ -421,6 +440,42 @@
         } catch (err) {
           console.error("ICE error", err);
         }
+      }
+    });
+
+    // Join WebRTC room immediately on session join so peers connect regardless of mic state
+    socket.emit("webrtc_join", { session_id: sessionId });
+    socket.emit("request_audio_peers", { session_id: sessionId });
+
+    // Cleanup when a peer leaves
+    socket.on("peer_left", (data) => {
+      const { sid } = data;
+      const pc = pcPeers[sid];
+      if (pc) {
+        try { pc.close(); } catch (_) {}
+        delete pcPeers[sid];
+      }
+      const audioElem = document.getElementById("remoteAudio_" + sid);
+      if (audioElem) {
+        audioElem.srcObject = null;
+        audioElem.remove();
+      }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener("beforeunload", () => {
+      for (const [peerId, pc] of Object.entries(pcPeers)) {
+        try { pc.close(); } catch (_) {}
+        const audioElem = document.getElementById("remoteAudio_" + peerId);
+        if (audioElem) {
+          audioElem.srcObject = null;
+          audioElem.remove();
+        }
+      }
+      pcPeers = {};
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
       }
     });
   </script>
