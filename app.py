@@ -5,6 +5,9 @@ import subprocess
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit, join_room
 
+import select
+import threading
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'siren-secret-key-123'
 
@@ -37,6 +40,7 @@ def editor(session_id):
     if session_id not in sessions:
         return "Session not found", 404
     return render_template("editor.html", session_id=session_id)
+# Update your run_code function and add input handling
 
 @app.route("/run_code", methods=["POST"])
 def run_code():
@@ -49,25 +53,74 @@ def run_code():
             tmp.write(code)
             tmp.flush()
 
-        # Run the Python code
-        result = subprocess.run(
-            [sys.executable, tmp.name],
-            capture_output=True,
+        # Run the process with pipes for input/output
+        proc = subprocess.Popen(
+            [sys.executable, "-u", tmp.name],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=30
+            bufsize=1,
+            universal_newlines=True
         )
         
-        output = result.stdout
-        if result.stderr:
-            output += f"\nErrors:\n{result.stderr}"
-            
-        return jsonify({"output": output})
-        
-    except subprocess.TimeoutExpired:
-        return jsonify({"output": "Error: Code execution timed out (30 seconds)"})
-    except Exception as e:
-        return jsonify({"output": f"Error: {str(e)}"})
+        # Store the process for input handling
+        process_id = str(uuid.uuid4())[:8]
+        running_procs[process_id] = proc
 
+        socketio.emit("code_output", {"output": "[Program started]\\n"}, room=session_id)
+
+        def stream_output():
+            try:
+                while True:
+                    # Check if process has terminated
+                    if proc.poll() is not None:
+                        break
+                    
+                    # Read output line by line
+                    line = proc.stdout.readline()
+                    if line:
+                        socketio.emit("code_output", {"output": line}, room=session_id)
+                    else:
+                        # No more output, break
+                        break
+                        
+            except Exception as e:
+                socketio.emit("code_output", {"output": f"[Error: {e}]\\n"}, room=session_id)
+            finally:
+                # Cleanup
+                if process_id in running_procs:
+                    del running_procs[process_id]
+                socketio.emit("code_output", {"output": "[Program finished]\\n"}, room=session_id)
+
+        # Start output streaming in a separate thread
+        threading.Thread(target=stream_output, daemon=True).start()
+        
+        return jsonify({
+            "output": "[Program started - waiting for output...]\\n",
+            "process_id": process_id
+        })
+
+    except Exception as e:
+        return jsonify({"output": f"Error: {str(e)}\\n"})
+
+@socketio.on("provide_input")
+def handle_input(data):
+    session_id = data.get("session_id")
+    text = data.get("text", "")
+    process_id = data.get("process_id")
+    
+    proc = running_procs.get(process_id)
+    if proc and proc.poll() is None:
+        try:
+            # Send input to the process
+            proc.stdin.write(text + "\\n")
+            proc.stdin.flush()
+            emit("code_output", {"output": f"[Input sent: {text}]\\n"}, room=session_id)
+        except Exception as e:
+            emit("code_output", {"output": f"Error sending input: {e}\\n"}, room=session_id)
+    else:
+        emit("code_output", {"output": "[No running process to send input]\\n"}, room=session_id)
 @socketio.on("connect")
 def handle_connect():
     print(f"Client connected: {request.sid}")
