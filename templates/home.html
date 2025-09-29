@@ -1,142 +1,254 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Collaborative IDE</title>
-  <style>
-    :root {
-      --bg: #0f172a;
-      --panel: #111827;
-      --panel-light: #1f2937;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --accent: #3b82f6;
-      --border: #2a3342;
-      --shadow: 0 10px 30px rgba(0,0,0,0.35);
-    }
-
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
-    body {
-      margin: 0;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      color: var(--text);
-      background: linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Topbar to match editor */
-    .topbar {
-      position: sticky; top: 0; z-index: 10;
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 16px;
-      background: rgba(17,24,39,0.9);
-      backdrop-filter: blur(8px);
-      border-bottom: 1px solid var(--border);
-    }
-    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: 0.2px; }
-    .badge { color: var(--muted); font-weight: 500; }
-
-    /* Centered panel */
-    .wrap { flex: 1; display: grid; place-items: center; padding: 24px; }
-    .panel {
-      width: 100%; max-width: 720px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background:
-        radial-gradient(900px 300px at 10% -10%, rgba(59,130,246,0.12), transparent 40%),
-        radial-gradient(500px 240px at 90% -20%, rgba(16,185,129,0.12), transparent 30%),
-        var(--panel);
-      box-shadow: var(--shadow);
-      padding: 20px;
-    }
-    h2 { margin: 0 0 8px 0; }
-    p { margin: 0 0 16px 0; color: var(--muted); }
-
-    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-
-    input {
-      padding: 10px 12px;
-      font-size: 14px;
-      color: var(--text);
-      background: #0b1220;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      outline: none;
-      transition: border-color 0.2s ease, background 0.2s ease;
-    }
-    input:focus { border-color: #2a3b52; background: #0d1422; }
-
-    button {
-      padding: 10px 14px; font-size: 14px; color: var(--text);
-      background: linear-gradient(180deg, #2563eb 0%, #1e40af 100%);
-      border: 1px solid #2a3b52; border-radius: 8px; cursor: pointer;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
-      transition: background 0.2s ease, transform 0.08s ease, border-color 0.2s ease;
-    }
-    button:hover { background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%); }
-    button:active { transform: translateY(1px); }
-    #createBtn { background: linear-gradient(180deg, #1e293b 0%, #111827 100%); border-color: var(--border); }
-    #createBtn:hover { background: linear-gradient(180deg, #253449 0%, #121a27 100%); border-color: #2a3b52; }
-
-    #sessionCode { width: 240px; }
-    #nameInput { width: 180px; }
-
-    @media (max-width: 720px) {
-      .panel { padding: 16px; }
-      #sessionCode, #nameInput { width: 100%; }
-    }
-  </style>
+    <title>SCIAM - Collaborative Code Editor</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --text: #f1f5f9;
+            --accent: #3b82f6;
+            --success: #10b981;
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            padding: 2rem 1rem;
+            text-align: center;
+            border-bottom: 4px solid #1e3a8a;
+        }
+        
+        .logo {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin: 0;
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin: 0.5rem 0 0 0;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            flex: 1;
+        }
+        
+        .card {
+            background: var(--panel);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            border: 1px solid #334155;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .feature {
+            background: #1e293b;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border-left: 4px solid var(--accent);
+        }
+        
+        .feature h3 {
+            margin: 0 0 0.5rem 0;
+            color: var(--accent);
+        }
+        
+        .actions {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        
+        .btn.primary {
+            background: var(--accent);
+            color: white;
+        }
+        
+        .btn.primary:hover {
+            background: #2563eb;
+            transform: translateY(-2px);
+        }
+        
+        .btn.secondary {
+            background: #475569;
+            color: white;
+        }
+        
+        .btn.secondary:hover {
+            background: #64748b;
+        }
+        
+        .session-form {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .input-group {
+            flex: 1;
+        }
+        
+        input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            background: #1e293b;
+            color: var(--text);
+            font-size: 1rem;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            border-top: 1px solid #334155;
+            margin-top: auto;
+        }
+        
+        @media (max-width: 768px) {
+            .actions {
+                flex-direction: column;
+            }
+            
+            .session-form {
+                flex-direction: column;
+            }
+        }
+    </style>
 </head>
 <body>
-  <div class="topbar">
-    <div class="brand">
-      <span>Collaborative IDE</span>
-      <span class="badge">Python</span>
+    <div class="header">
+        <h1 class="title">SCIAM</h1>
+        <p class="subtitle">Real-time Collaborative Code Editor</p>
     </div>
-  </div>
-
-  <div class="wrap">
-    <div class="panel">
-      <h2>Collaborative IDE</h2>
-      <p>Enter your name and session code to join, or create a new session.</p>
-
-      <div class="row">
-        <input id="nameInput" type="text" placeholder="Your name" autocomplete="off">
-        <input id="sessionCode" type="text" placeholder="Session code (e.g. ab12cd)" autocomplete="off">
-        <button id="joinBtn">Join</button>
-        <button id="createBtn">Create New Session</button>
-      </div>
+    
+    <div class="container">
+        <div class="card">
+            <h2>Get Started</h2>
+            <div class="actions">
+                <button class="btn primary" onclick="createSession()">Create New Session</button>
+                <div class="input-group">
+                    <input type="text" id="sessionId" placeholder="Enter Session ID to Join">
+                    <button class="btn secondary" onclick="joinSession()" style="margin-top: 0.5rem; width: 100%;">Join Session</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Features</h2>
+            <div class="features">
+                <div class="feature">
+                    <h3>👥 Real-time Collaboration</h3>
+                    <p>Code together with multiple participants in real-time</p>
+                </div>
+                <div class="feature">
+                    <h3>🎤 Voice Chat</h3>
+                    <p>Communicate with built-in audio calling</p>
+                </div>
+                <div class="feature">
+                    <h3>🐍 Python Execution</h3>
+                    <p>Run and test Python code directly in the editor</p>
+                </div>
+                <div class="feature">
+                    <h3>💬 Live Chat</h3>
+                    <p>Text chat with other participants</p>
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
+    
+    <div class="footer">
+        <p>SIREN Collaborative Editor | Built with Flask & WebRTC</p>
+    </div>
 
-  <script>
-    (function() {
-      const nameInput = document.getElementById("nameInput");
-      const codeInput = document.getElementById("sessionCode");
-      const joinBtn = document.getElementById("joinBtn");
-      const createBtn = document.getElementById("createBtn");
-
-      function join() {
-        const name = (nameInput.value || "").trim();
-        const code = (codeInput.value || "").trim();
-        if (!name) { alert("Enter your name"); return; }
-        if (!code) { alert("Enter session code"); return; }
-        window.location.href = `/editor/${code}?name=${encodeURIComponent(name)}`;
-      }
-
-      joinBtn.onclick = join;
-      createBtn.onclick = async function() {
-        const name = (nameInput.value || "").trim();
-        if (!name) { alert("Enter your name"); return; }
-
-        const resp = await fetch("/create_session", { method: "POST" });
-        const data = await resp.json();
-        const code = data.session_id;
-        window.location.href = `/editor/${code}?name=${encodeURIComponent(name)}`;
-      }
-    })();
-  </script>
+    <script>
+        async function createSession() {
+            try {
+                const response = await fetch('/create_session', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                if (data.session_id) {
+                    const userName = prompt('Enter your name:', 'Coder');
+                    if (userName !== null) {
+                        window.location.href = `/editor/${data.session_id}?name=${encodeURIComponent(userName)}`;
+                    }
+                }
+            } catch (error) {
+                alert('Error creating session: ' + error.message);
+            }
+        }
+        
+        function joinSession() {
+            const sessionId = document.getElementById('sessionId').value.trim();
+            if (!sessionId) {
+                alert('Please enter a session ID');
+                return;
+            }
+            
+            const userName = prompt('Enter your name:', 'Coder');
+            if (userName !== null) {
+                window.location.href = `/editor/${sessionId}?name=${encodeURIComponent(userName)}`;
+            }
+        }
+        
+        document.getElementById('sessionId').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                joinSession();
+            }
+        });
+        
+        document.getElementById('sessionId').focus();
+    </script>
 </body>
 </html>
