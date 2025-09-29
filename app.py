@@ -28,12 +28,14 @@ def index():
 def create_session():
     session_id = str(uuid.uuid4())[:8]
     sessions[session_id] = {
-        "content": "# Welcome to SIREN Collaborative Editor\n# Start coding in Python...\nprint('Hello, World!')\n\n# Example: Code that requires input\n# name = input('Enter your name: ')\n# print(f'Hello, {name}!)",
+        "content": "# Welcome to SIREN Collaborative Editor\n# Start coding in Python...\n\n# Example: Code with input and error handling\n'''\ntry:\n    num = int(input(\"Enter a number: \"))\n    print(\"100 divided by\", num, \"=\", 100 / num)\nexcept ZeroDivisionError:\n    print(\"Error: Cannot divide by zero\")\nexcept ValueError:\n    print(\"Error: Invalid input, please enter a number\")\n'''\n\nprint(\"Hello, World!\")",
         "participants": {},
         "host_id": None,
         "writer_id": None,
         "chat_messages": [],
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "is_running_code": False,
+        "current_process": None
     }
     print(f"🎉 New session created: {session_id}")
     return jsonify({"session_id": session_id})
@@ -49,6 +51,13 @@ def run_code():
     data = request.get_json()
     code = data.get("code", "")
     session_id = data.get("session_id")
+
+    if session_id not in sessions:
+        return jsonify({"output": "❌ Error: Session not found\n"})
+
+    # Set session as running code
+    sessions[session_id]["is_running_code"] = True
+    sessions[session_id]["current_process"] = None
 
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode='w', encoding='utf-8') as tmp:
@@ -72,8 +81,11 @@ def run_code():
             'process': proc,
             'session_id': session_id
         }
+        
+        sessions[session_id]["current_process"] = process_id
 
         socketio.emit("code_output", {"output": "🚀 [Program started]\\n"}, room=session_id)
+        socketio.emit("code_running_status", {"is_running": True, "process_id": process_id}, room=session_id)
 
         def stream_output():
             try:
@@ -98,7 +110,12 @@ def run_code():
                 # Cleanup
                 if process_id in running_procs:
                     del running_procs[process_id]
+                
+                sessions[session_id]["is_running_code"] = False
+                sessions[session_id]["current_process"] = None
+                
                 socketio.emit("code_output", {"output": "✅ [Program finished]\\n"}, room=session_id)
+                socketio.emit("code_running_status", {"is_running": False}, room=session_id)
 
         # Start output streaming in a separate thread
         thread = threading.Thread(target=stream_output, daemon=True)
@@ -110,6 +127,8 @@ def run_code():
         })
 
     except Exception as e:
+        sessions[session_id]["is_running_code"] = False
+        sessions[session_id]["current_process"] = None
         return jsonify({"output": f"❌ Error: {str(e)}\\n"})
 
 # ------------------ SocketIO Event Handlers ------------------
@@ -185,6 +204,12 @@ def handle_join(data):
     if session["chat_messages"]:
         emit("chat_history", {"messages": session["chat_messages"][-50:]})
     
+    # Send current code running status
+    emit("code_running_status", {
+        "is_running": session["is_running_code"],
+        "process_id": session["current_process"]
+    })
+    
     # Notify all users about updated participants
     emit_participants_update(session_id)
     
@@ -208,10 +233,14 @@ def handle_code_change(data):
     
     if session_id in sessions:
         session = sessions[session_id]
-        if session["writer_id"] == sid:
+        # Only allow code changes if no code is currently running
+        if not session["is_running_code"] and session["writer_id"] == sid:
             session["content"] = content
             emit("code_update", {"content": content}, room=session_id, include_self=False)
             print(f"📝 Code updated by {session['participants'][sid]['name']} in session {session_id}")
+        elif session["is_running_code"]:
+            # Notify user that code cannot be changed while running
+            emit("error", {"msg": "Cannot edit code while program is running"}, to=sid)
 
 @socketio.on("grant_write")
 def handle_grant_write(data):
