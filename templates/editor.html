@@ -5,6 +5,7 @@
   <title>SCIAM - Session {{ session_id }}</title>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs/loader.js"></script>
+  
   <style>
     /* [Keep all your existing CSS styles exactly as they are] */
     /* Your current CSS is perfect, no changes needed */
@@ -18,6 +19,7 @@
       --chat-bg: #0b1220;
       --chat-bubble-me: #2563eb;
       --chat-bubble-other: #374151;
+      --warning: #f59e0b;
     }
     body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
     .topbar { display: flex; justify-content: space-between; padding: 10px 16px; background: #111827; border-bottom: 1px solid #2a3342; }
@@ -27,13 +29,15 @@
     .container { display: flex; height: calc(100vh - 50px); }
     .left { flex: 1; display: flex; flex-direction: column; }
     #editor { flex: 1; }
-    .toolbar { padding: 8px; background: #111827; display: flex; gap: 8px; border-top: 1px solid #2a3342; }
+    .toolbar { padding: 8px; background: #111827; display: flex; gap: 8px; border-top: 1px solid #2a3342; align-items: center; }
     .btn { padding: 8px 16px; border-radius: 6px; border: 1px solid #2a3342; background: #1f2937; color: var(--text); cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px; }
     .btn:hover { background: #374151; }
     .btn.primary { background: #2563eb; border-color: #2563eb; }
     .btn.primary:hover { background: #1d4ed8; }
     .btn.success { background: var(--success); border-color: var(--success); }
     .btn.error { background: var(--error); border-color: var(--error); }
+    .btn.warning { background: var(--warning); border-color: var(--warning); color: #000; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
     #output { padding: 12px; background: #0b1220; border-top: 1px solid #2a3342; min-height: 100px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 14px; }
     #participantsDrawer { width: 400px; border-left: 1px solid #2a3342; background: #0b1220; display: flex; flex-direction: column; }
     #plist { list-style: none; margin: 0; padding: 12px; flex: 1; }
@@ -67,7 +71,42 @@
     #audioLevelFill { height: 100%; width: 0%; background: var(--success); transition: width 0.1s; }
     .meeting-stats { display: flex; gap: 16px; font-size: 12px; color: #9ca3af; }
 
-    /* ==================== CHAT STYLES ADDED BELOW ==================== */
+    /* Input Controls Styles */
+    .input-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .input-controls input {
+      padding: 8px 12px;
+      border: 1px solid #374151;
+      border-radius: 4px;
+      background: #1f2937;
+      color: white;
+      width: 200px;
+      font-family: system-ui, sans-serif;
+    }
+
+    .input-controls input:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+
+    .input-controls input:enabled {
+      border-color: #059669;
+    }
+
+    .input-controls input:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .input-controls input::placeholder {
+      color: #9ca3af;
+    }
+
+    /* Chat Styles */
     .drawer-tabs {
       display: flex;
       background: #111827;
@@ -195,7 +234,7 @@
 <body>
   <div class="topbar">
     <div class="brand">
-      <span style="font-weight: bold; color: #3b82f6;">SIREN</span>
+      <span style="font-weight: bold; color: #3b82f6;">SCIAM</span>
       <span class="session-code">Session: {{ session_id }}</span>
       <div class="connection-status">
         <span id="statusDot" class="status-dot connected"></span>
@@ -216,6 +255,13 @@
         <button id="runBtn" class="btn primary">▶ Run Code</button>
         <button id="clearBtn" class="btn">🗑️ Clear Output</button>
         <div style="flex: 1;"></div>
+        
+        <!-- Static Input Box -->
+        <div class="input-controls">
+          <input type="text" id="staticInput" placeholder="Run code to enable input..." disabled />
+          <button id="sendInputBtn" class="btn" style="background: #059669;" disabled>Send Input</button>
+        </div>
+        
         <button id="settingsBtn" class="btn">⚙️ Settings</button>
       </div>
       <div id="output"></div>
@@ -283,6 +329,7 @@
     </div>
   </div>
 
+
   <script>
     const socket = io();
     const sessionId = "{{ session_id }}";
@@ -349,7 +396,7 @@
     require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs' }});
     require(["vs/editor/editor.main"], function () {
       editor = monaco.editor.create(document.getElementById("editor"), {
-        value: "# Welcome to SIREN Collaborative Editor\n# Start coding in Python...\nprint('Hello, World!')",
+        value: "# Welcome to SCIAM Collaborative Editor\n# Start coding in Python...\nprint('Hello, World!')",
         language: "python",
         theme: "vs-dark",
         automaticLayout: true,
@@ -969,7 +1016,7 @@
 
     // UI Helpers
     document.getElementById("helpBtn").addEventListener("click", () => {
-      alert(`SIREN Features:\n\n💬 NEW: WhatsApp-style chat\n🎤 AUDIO: Auto-connect voice chat\n🐍 CODE: Python execution\n👥 COLLAB: Real-time collaboration\n\nUse the tabs to switch between Participants and Chat!`);
+      alert(`SCIAM Features:\n\n💬 NEW: WhatsApp-style chat\n🎤 AUDIO: Auto-connect voice chat\n🐍 CODE: Python execution\n👥 COLLAB: Real-time collaboration\n\nUse the tabs to switch between Participants and Chat!`);
     });
 
     document.getElementById("settingsBtn").addEventListener("click", () => {
@@ -981,7 +1028,144 @@
       disconnectAudio();
     });
 
-    console.log("🚀 SIREN with Chat functionality ready!");
+    
+    const staticInput = document.getElementById("staticInput");
+    const sendInputBtn = document.getElementById("sendInputBtn");
+
+    document.getElementById("runBtn").onclick = async () => {
+        const output = document.getElementById("output");
+        output.textContent = "🚀 Starting code execution...\n";
+        output.scrollTop = output.scrollHeight;
+        
+        const runBtn = document.getElementById("runBtn");
+        runBtn.disabled = true;
+        runBtn.textContent = "⏳ Running...";
+        runBtn.classList.add("warning");
+        
+        // Enable input controls
+        staticInput.disabled = false;
+        sendInputBtn.disabled = false;
+        staticInput.placeholder = "Type input for program...";
+        staticInput.focus();
+        
+        try {
+            const response = await fetch("/run_code", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                    code: editor.getValue(), 
+                    session_id: sessionId 
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.status === "started") {
+                currentProcessId = data.process_id;
+                console.log("✅ Code execution started with process ID:", currentProcessId);
+                output.textContent += "Program started. Use the input box above to provide input.\n";
+            } else if (data.status === "error") {
+                output.textContent += `❌ ${data.message}\n`;
+                resetExecutionState();
+            } else {
+                output.textContent += "❌ Unexpected response from server\n";
+                resetExecutionState();
+            }
+        } catch (error) {
+            output.textContent += `❌ Network error: ${error.message}\n`;
+            resetExecutionState();
+        }
+    };
+
+    // Handle sending input from static input box
+    sendInputBtn.addEventListener("click", sendStaticInput);
+    
+    staticInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+            sendStaticInput();
+        }
+    });
+
+    function sendStaticInput() {
+        const userInput = staticInput.value.trim();
+        
+        if (!userInput) {
+            return;
+        }
+        
+        if (!currentProcessId) {
+            const output = document.getElementById("output");
+            output.textContent += "❌ No program is currently running\n";
+            return;
+        }
+        
+        const output = document.getElementById("output");
+        output.textContent += `📥 [Input]: ${userInput}\n`;
+        output.scrollTop = output.scrollHeight;
+        
+        // Send input to the backend process
+        fetch("/provide_input", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+                user_input: userInput,
+                process_id: currentProcessId
+            })
+        }).then(response => response.json())
+          .then(data => {
+              if (data.status === "success") {
+                  console.log("✅ Input sent successfully");
+                  staticInput.value = ""; // Clear input field
+                  staticInput.focus();
+              } else {
+                  output.textContent += `❌ ${data.message}\n`;
+              }
+          })
+          .catch(error => {
+              output.textContent += `❌ Error sending input: ${error.message}\n`;
+          });
+    }
+
+    // Handle real-time code output
+    socket.on("code_output", (data) => {
+        if (data.process_id === currentProcessId) {
+            const output = document.getElementById("output");
+            output.textContent += data.output;
+            output.scrollTop = output.scrollHeight;
+        }
+    });
+
+    // Handle code completion
+    socket.on("code_complete", (data) => {
+        if (data.process_id === currentProcessId) {
+            const output = document.getElementById("output");
+            output.textContent += "\n✅ Program execution completed\n";
+            output.scrollTop = output.scrollHeight;
+            
+            resetExecutionState();
+        }
+    });
+
+    function resetExecutionState() {
+        const runBtn = document.getElementById("runBtn");
+        runBtn.disabled = false;
+        runBtn.textContent = "▶ Run Code";
+        runBtn.classList.remove("warning");
+        
+        // Disable input controls
+        staticInput.disabled = true;
+        sendInputBtn.disabled = true;
+        staticInput.value = "";
+        staticInput.placeholder = "Run code to enable input...";
+        
+        currentProcessId = null;
+    }
+
+    document.getElementById("clearBtn").onclick = () => {
+        document.getElementById("output").textContent = "";
+        resetExecutionState();
+    };
+    console.log("🚀SCIAM with Chat functionality ready!");
   </script>
 </body>
 </html>
