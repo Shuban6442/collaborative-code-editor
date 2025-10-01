@@ -1,4 +1,8 @@
+import os
+import queue
+import select
 import sys
+import threading
 import uuid
 import tempfile
 import subprocess
@@ -8,7 +12,7 @@ from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit, join_room
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'siren-secret-key-123'
+app.config['SECRET_KEY'] 
 
 # Use threading async_mode for better compatibility
 socketio = SocketIO(app, 
@@ -17,6 +21,9 @@ socketio = SocketIO(app,
 
 # Store sessions in memory
 sessions = {}
+running_processes = {}
+input_queues = {}
+process_needs_input = {}
 
 @app.route("/")
 def index():
@@ -46,30 +53,259 @@ def run_code():
     data = request.get_json()
     code = data.get("code", "")
     session_id = data.get("session_id")
+    user_input = data.get("user_input", "")
+    process_id = data.get("process_id")
 
+    # If this is providing input to an existing process
+    if process_id and user_input:
+        if process_id in input_queues:
+            input_queues[process_id].put(user_input + "\n")
+            return jsonify({"status": "input_sent", "message": "Input sent to process"})
+        else:
+            return jsonify({"status": "error", "message": "Process not found or completed"})
+
+    try:
+        # Check if code contains input statements
+        code_needs_input = "input(" in code
+        
+        # Create a unique process ID for this execution
+        process_id = str(uuid.uuid4())
+        
+        # Create input queue for this process
+        input_queues[process_id] = queue.Queue()
+        process_needs_input[process_id] = code_needs_input
+        
+        # Run the code in a separate thread to handle input
+        thread = threading.Thread(
+            target=run_code_with_input,
+            args=(code, process_id, session_id, code_needs_input)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            "status": "started", 
+            "process_id": process_id,
+            "needs_input": code_needs_input,
+            "message": "Code execution started successfully"
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Error starting execution: {str(e)}"})
+
+def run_code_with_input(code, process_id, session_id, code_needs_input):
+    """Run Python code in a separate thread with smart input handling"""
+    process = None
+    temp_filename = None
+    
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode='w', encoding='utf-8') as tmp:
             tmp.write(code)
             tmp.flush()
+            temp_filename = tmp.name
 
-        # Run the Python code
-        result = subprocess.run(
-            [sys.executable, tmp.name],
-            capture_output=True,
+        # Create a subprocess with pipes for stdin/stdout/stderr
+        process = subprocess.Popen(
+            [sys.executable, temp_filename],
+            stdin=subprocess.PIPE if code_needs_input else None,  # Only provide stdin if needed
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=30
+            bufsize=1,
+            universal_newlines=True
         )
         
-        output = result.stdout
-        if result.stderr:
-            output += f"\nErrors:\n{result.stderr}"
+        running_processes[process_id] = process
+        
+        # Send initial confirmation
+        socketio.emit("code_output", {
+            "process_id": process_id,
+            "output": "🚀 Code execution started...\n",
+            "type": "system"
+        }, room=session_id)
+        
+        # If code doesn't need input, just let it run normally
+        if not code_needs_input:
+            print(f"🔧 Process {process_id}: Running without input handling")
+            try:
+                # Wait for process to complete with timeout
+                stdout, stderr = process.communicate(timeout=30)
+                
+                if stdout:
+                    socketio.emit("code_output", {
+                        "process_id": process_id,
+                        "output": stdout,
+                        "type": "stdout"
+                    }, room=session_id)
+                
+                if stderr:
+                    socketio.emit("code_output", {
+                        "process_id": process_id,
+                        "output": stderr,
+                        "type": "stderr"
+                    }, room=session_id)
+                
+                # Send completion signal
+                socketio.emit("code_complete", {
+                    "process_id": process_id,
+                    "status": "completed"
+                }, room=session_id)
+                
+                return
+                
+            except subprocess.TimeoutExpired:
+                process.kill()
+                socketio.emit("code_output", {
+                    "process_id": process_id,
+                    "output": "\n⏰ Error: Code execution timed out (30 seconds)\n",
+                    "type": "error"
+                }, room=session_id)
+                return
+            except Exception as e:
+                socketio.emit("code_output", {
+                    "process_id": process_id,
+                    "output": f"\n❌ Error: {str(e)}\n",
+                    "type": "error"
+                }, room=session_id)
+                return
+        
+        # If code needs input, use the input handling logic
+        print(f"🔧 Process {process_id}: Running WITH input handling")
+        
+        # Function to read output from the process
+        def read_output():
+            while process.poll() is None:
+                try:
+                    # Use select to check if there's output available
+                    ready, _, _ = select.select([process.stdout, process.stderr], [], [], 0.1)
+                    
+                    for stream in ready:
+                        if stream == process.stdout:
+                            line = process.stdout.readline()
+                            if line:
+                                socketio.emit("code_output", {
+                                    "process_id": process_id,
+                                    "output": line,
+                                    "type": "stdout"
+                                }, room=session_id)
+                        elif stream == process.stderr:
+                            line = process.stderr.readline()
+                            if line:
+                                socketio.emit("code_output", {
+                                    "process_id": process_id,
+                                    "output": line,
+                                    "type": "stderr"
+                                }, room=session_id)
+                except (IOError, OSError):
+                    break
+        
+        # Start output reading thread
+        output_thread = threading.Thread(target=read_output)
+        output_thread.daemon = True
+        output_thread.start()
+        
+        # Main loop to handle process execution and input
+        start_time = time.time()
+        timeout = 30  # 30 seconds timeout
+        
+        while process.poll() is None:
+            if time.time() - start_time > timeout:
+                process.kill()
+                socketio.emit("code_output", {
+                    "process_id": process_id,
+                    "output": "\n⏰ Error: Code execution timed out (30 seconds)\n",
+                    "type": "error"
+                }, room=session_id)
+                break
             
-        return jsonify({"output": output})
+            # Check if process needs input (is waiting)
+            try:
+                # Try to get input from queue with timeout
+                user_input = input_queues[process_id].get(timeout=0.1)
+                process.stdin.write(user_input)
+                process.stdin.flush()
+                
+                # Notify that input was received
+                socketio.emit("input_received", {
+                    "process_id": process_id
+                }, room=session_id)
+                
+            except queue.Empty:
+                # No input available, continue monitoring
+                pass
+            except BrokenPipeError:
+                # Process has ended
+                break
+            
+            time.sleep(0.05)
+        
+        # Get any remaining output after process ends
+        try:
+            remaining_stdout, remaining_stderr = process.communicate(timeout=2)
+            if remaining_stdout:
+                socketio.emit("code_output", {
+                    "process_id": process_id,
+                    "output": remaining_stdout,
+                    "type": "stdout"
+                }, room=session_id)
+            if remaining_stderr:
+                socketio.emit("code_output", {
+                    "process_id": process_id,
+                    "output": remaining_stderr,
+                    "type": "stderr"
+                }, room=session_id)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        
+        # Send completion signal
+        socketio.emit("code_complete", {
+            "process_id": process_id,
+            "status": "completed"
+        }, room=session_id)
         
     except subprocess.TimeoutExpired:
-        return jsonify({"output": "Error: Code execution timed out (30 seconds)"})
+        socketio.emit("code_output", {
+            "process_id": process_id,
+            "output": "\n⏰ Error: Code execution timed out (30 seconds)\n",
+            "type": "error"
+        }, room=session_id)
     except Exception as e:
-        return jsonify({"output": f"Error: {str(e)}"})
+        socketio.emit("code_output", {
+            "process_id": process_id,
+            "output": f"\n❌ Error: {str(e)}\n",
+            "type": "error"
+        }, room=session_id)
+    finally:
+        # Cleanup
+        if process_id in running_processes:
+            del running_processes[process_id]
+        if process_id in input_queues:
+            del input_queues[process_id]
+        if process_id in process_needs_input:
+            del process_needs_input[process_id]
+        # Clean up temporary file
+        try:
+            if temp_filename and os.path.exists(temp_filename):
+                os.unlink(temp_filename)
+        except:
+            pass
+
+# Add a new endpoint to provide input to running process
+@app.route("/provide_input", methods=["POST"])
+def provide_input():
+    data = request.get_json()
+    process_id = data.get("process_id")
+    user_input = data.get("user_input", "")
+    
+    if not process_id or not user_input:
+        return jsonify({"status": "error", "message": "Process ID and input are required"})
+    
+    if process_id in input_queues:
+        input_queues[process_id].put(user_input + "\n")
+        return jsonify({"status": "success", "message": "Input sent to process"})
+    else:
+        return jsonify({"status": "error", "message": "Process not found or completed"})
+
 
 @socketio.on("connect")
 def handle_connect():
